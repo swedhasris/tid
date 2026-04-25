@@ -1,0 +1,184 @@
+{
+  "entities": {
+    "users": {
+      "title": "User",
+      "description": "System users with roles",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "description": "Firebase Auth UID" },
+        "name": { "type": "string" },
+        "email": { "type": "string", "format": "email" },
+        "role": { "type": "string", "enum": ["user", "agent", "admin"] },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["uid", "name", "email", "role"]
+    },
+    "tickets": {
+      "title": "Ticket",
+      "description": "IT Support Tickets (Connect Style)",
+      "type": "object",
+      "properties": {
+        "number": { "type": "string" },
+        "caller": { "type": "string" },
+        "category": { "type": "string" },
+        "subcategory": { "type": "string" },
+        "service": { "type": "string" },
+        "serviceOffering": { "type": "string" },
+        "cmdbItem": { "type": "string" },
+        "title": { "type": "string", "description": "Short description" },
+        "description": { "type": "string" },
+        "channel": { "type": "string", "enum": ["Phone", "Email", "Self-service", "Walk-in", "Other"] },
+        "status": { "type": "string", "enum": ["New", "In Progress", "On Hold", "Resolved", "Closed", "Canceled", "Pending Approval"] },
+        "impact": { "type": "string", "enum": ["1 - High", "2 - Medium", "3 - Low"] },
+        "urgency": { "type": "string", "enum": ["1 - High", "2 - Medium", "3 - Low"] },
+        "priority": { "type": "string", "enum": ["1 - Critical", "2 - High", "3 - Moderate", "4 - Low"] },
+        "assignmentGroup": { "type": "string" },
+        "assignedTo": { "type": "string" },
+        "createdBy": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" },
+        "firstResponseAt": { "type": "string", "format": "date-time" },
+        "resolvedAt": { "type": "string", "format": "date-time" },
+        "responseDeadline": { "type": "string", "format": "date-time" },
+        "resolutionDeadline": { "type": "string", "format": "date-time" },
+        "onHoldStart": { "type": "string", "format": "date-time" },
+        "totalPausedTime": { "type": "number", "description": "Total paused time in milliseconds" },
+        "responseSlaStatus": { "type": "string", "enum": ["In Progress", "Completed", "Breached", "At Risk"] },
+        "resolutionSlaStatus": { "type": "string", "enum": ["In Progress", "Completed", "Breached", "At Risk"] },
+        "history": { "type": "array" }
+      },
+      "required": ["number", "caller", "title", "status", "priority", "createdBy"]
+    },
+    "comments": {
+      "title": "Comment",
+      "description": "Ticket comments",
+      "type": "object",
+      "properties": {
+        "ticketId": { "type": "string" },
+        "userId": { "type": "string" },
+        "userName": { "type": "string" },
+        "message": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      }
+    },
+    "approvals": {
+      "title": "Approval",
+      "description": "Ticket approval requests",
+      "type": "object",
+      "properties": {
+        "ticketId": { "type": "string" },
+        "status": { "type": "string", "enum": ["Pending", "Approved", "Rejected"] },
+        "requestedBy": { "type": "string" },
+        "approvedBy": { "type": "string" },
+        "comments": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      }
+    },
+    "sla_policies": {
+      "title": "SLA Policy",
+      "description": "Definitions for Service Level Agreements",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "priority": { "type": "string" },
+        "category": { "type": "string" },
+        "responseTimeHours": { "type": "number" },
+        "resolutionTimeHours": { "type": "number" },
+        "isActive": { "type": "boolean" }
+      },
+      "required": ["name", "priority", "responseTimeHours", "resolutionTimeHours"]
+    },
+    "assets": {
+      "title": "Asset (CI)",
+      "description": "Configuration Items in CMDB",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "type": { "type": "string", "enum": ["Server", "Database", "Network", "Application", "Hardware"] },
+        "status": { "type": "string", "enum": ["Operational", "Degraded", "Maintenance", "Retired"] },
+        "owner": { "type": "string" },
+        "location": { "type": "string" }
+      },
+      "required": ["name", "type", "status"]
+    },
+    "problems": {
+      "title": "Problem",
+      "description": "Problem Management records",
+      "type": "object",
+      "properties": {
+        "title": { "type": "string" },
+        "status": { "type": "string" },
+        "priority": { "type": "string" },
+        "assignedTo": { "type": "string" },
+        "incidents": { "type": "number" }
+      },
+      "required": ["title", "status", "priority"]
+    },
+    "changes": {
+      "title": "Change Request",
+      "description": "Change Management records",
+      "type": "object",
+      "properties": {
+        "title": { "type": "string" },
+        "type": { "type": "string", "enum": ["Normal", "Standard", "Emergency"] },
+        "state": { "type": "string" },
+        "risk": { "type": "string" },
+        "requester": { "type": "string" },
+        "plannedDate": { "type": "string" }
+      },
+      "required": ["title", "type", "state", "risk"]
+    },
+    "knowledge": {
+      "title": "Knowledge Article",
+      "description": "Knowledge Base articles",
+      "type": "object",
+      "properties": {
+        "title": { "type": "string" },
+        "category": { "type": "string" },
+        "content": { "type": "string" },
+        "views": { "type": "number" },
+        "rating": { "type": "number" },
+        "author": { "type": "string" }
+      },
+      "required": ["title", "category", "author"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": "users",
+      "description": "User profile data"
+    },
+    "/tickets/{ticketId}": {
+      "schema": "tickets",
+      "description": "Support tickets"
+    },
+    "/tickets/{ticketId}/comments/{commentId}": {
+      "schema": "comments",
+      "description": "Comments on a specific ticket"
+    },
+    "/approvals/{approvalId}": {
+      "schema": "approvals",
+      "description": "Approval requests"
+    },
+    "/sla_policies/{policyId}": {
+      "schema": "sla_policies",
+      "description": "SLA policy definitions"
+    },
+    "/assets/{assetId}": {
+      "schema": "assets",
+      "description": "CMDB configuration items"
+    },
+    "/problems/{problemId}": {
+      "schema": "problems",
+      "description": "Problem records"
+    },
+    "/changes/{changeId}": {
+      "schema": "changes",
+      "description": "Change requests"
+    },
+    "/knowledge/{articleId}": {
+      "schema": "knowledge",
+      "description": "Knowledge base articles"
+    }
+  }
+}
