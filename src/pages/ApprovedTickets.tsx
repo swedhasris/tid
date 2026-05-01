@@ -4,7 +4,7 @@ import { db } from "../lib/firebase";
 import { useAuth } from "../contexts/AuthContext";
 import { CheckCircle2, Search, Eye, Clock, User, Tag } from "lucide-react";
 import { Link } from "react-router-dom";
-import { cn } from "@/lib/utils";
+import { cn, formatDate } from "@/lib/utils";
 
 const PRIORITY_COLORS: Record<string, string> = {
   "1 - Critical": "bg-red-100 text-red-700",
@@ -17,13 +17,6 @@ const STATUS_COLORS: Record<string, string> = {
   "Resolved": "bg-green-100 text-green-700",
   "Closed":   "bg-gray-100 text-gray-700",
 };
-
-function formatDate(val: any): string {
-  if (!val) return "—";
-  if (val?.seconds) return new Date(val.seconds * 1000).toLocaleDateString("en-US", { year: "numeric", month: "short", day: "numeric" });
-  if (typeof val === "string") return new Date(val).toLocaleDateString("en-US", { year: "numeric", month: "short", day: "numeric" });
-  return "—";
-}
 
 export function ApprovedTickets() {
   const { user, profile } = useAuth();

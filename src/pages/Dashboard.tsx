@@ -5,6 +5,7 @@ import { useAuth } from "../contexts/AuthContext";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell } from "recharts";
 import { RefreshCw, LayoutGrid } from "lucide-react";
 import { Link } from "react-router-dom";
+import { formatDate } from "../lib/utils";
 
 const PRIORITY_COLORS: Record<string, string> = {
   "1 - Critical": "#e74c3c",
@@ -250,7 +251,7 @@ export function Dashboard() {
                     <td className="p-3 text-[11px]">{t.category ?? "—"}</td>
                     <td className="p-3 text-[11px]">{t.assignedTo ? t.assignedTo.slice(0,8)+"…" : <span className="text-muted-foreground italic">Unassigned</span>}</td>
                     <td className="p-3 text-[11px] text-muted-foreground">
-                      {ts ? new Date(ts).toLocaleDateString() : "—"}
+                      {formatDate(t.createdAt)}
                     </td>
                   </tr>
                 );

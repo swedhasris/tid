@@ -313,13 +313,18 @@ async function startServer() {
         return res.status(500).json({ error: "Gemini API key not configured" });
       }
 
-      const ai = new GoogleGenAI({ apiKey });
-      const result = await ai.models.generateContent({
+      const ai = new GoogleGenAI(apiKey);
+      const model = ai.getGenerativeModel({
         model: "gemini-flash-latest",
-        contents: `Analyze the following IT issue and classify it.\nIssue: "${text}"\n\nRespond ONLY with a valid JSON object with "category" and "priority" keys.\nCategory must be one of: "Network", "Software", "Hardware", "Database", "Inquiry / Help".\nPriority must be one of: "Low", "Medium", "High", "Critical".\nExample: {"category": "Network", "priority": "High"}`,
+        systemInstruction: `Analyze the following IT issue and classify it.
+Respond ONLY with a valid JSON object with "category" and "priority" keys.
+Category must be one of: "Network", "Software", "Hardware", "Database", "Inquiry / Help".
+Priority must be one of: "Low", "Medium", "High", "Critical".
+Example: {"category": "Network", "priority": "High"}`
       });
 
-      const raw = (result.text || "").replace(/```json\s*/g, "").replace(/```/g, "").trim();
+      const result = await model.generateContent(text);
+      const raw = result.response.text().replace(/```json\s*/g, "").replace(/```/g, "").trim();
       let classification: any = { category: "Inquiry / Help", priority: "Medium" };
       try { classification = JSON.parse(raw); } catch {}
 
@@ -343,13 +348,14 @@ async function startServer() {
         return res.status(500).json({ error: "Gemini API key not configured" });
       }
 
-      const ai = new GoogleGenAI({ apiKey });
-      const result = await ai.models.generateContent({
+      const ai = new GoogleGenAI(apiKey);
+      const model = ai.getGenerativeModel({
         model: "gemini-flash-latest",
-        contents: `A user is experiencing this IT issue: "${text}".\nProvide a short, direct suggested solution to help them fix it before creating a ticket. Keep it under 3 sentences and be friendly.`,
+        systemInstruction: "A user is experiencing an IT issue. Provide a short, direct suggested solution to help them fix it before creating a ticket. Keep it under 3 sentences and be friendly."
       });
 
-      const suggestion = result.text || "Please create a ticket and our team will assist you shortly.";
+      const result = await model.generateContent(text);
+      const suggestion = result.response.text() || "Please create a ticket and our team will assist you shortly.";
       res.json({ suggestion });
     } catch (error: any) {
       console.error("[AI Suggest] Error:", error.message);
@@ -377,12 +383,10 @@ async function startServer() {
         });
       }
 
-      const ai = new GoogleGenAI({ apiKey });
-      const result = await ai.models.generateContent({
+      const ai = new GoogleGenAI(apiKey);
+      const model = ai.getGenerativeModel({
         model: "gemini-1.5-flash",
-        contents: message,
-        config: {
-          systemInstruction: `You are Kiru, a friendly and intelligent AI assistant — like a smart, helpful friend who is always ready to chat.
+        systemInstruction: `You are Kiru, a friendly and intelligent AI assistant — like a smart, helpful friend who is always ready to chat.
 
 Personality:
 - Warm, polite, and easy to talk to
@@ -420,10 +424,10 @@ Output style:
 - Keep responses clear and easy to read
 
 Goal: Make the user feel like they are chatting with a smart, friendly assistant who is helpful, reliable, and easy to talk to — just like ChatGPT.`
-        }
       });
 
-      const responseText = result.text || "I am sorry, I could not process that request.";
+      const result = await model.generateContent(message);
+      const responseText = result.response.text() || "I am sorry, I could not process that request.";
       console.log(`[Kiru AI] Response generated successfully (${responseText.length} chars)`);
       res.json({ response: responseText });
     } catch (error: any) {

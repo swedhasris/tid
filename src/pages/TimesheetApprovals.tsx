@@ -5,7 +5,7 @@ import { useAuth } from "../contexts/AuthContext";
 import { ROLE_HIERARCHY } from "../lib/roles";
 import { ShieldAlert, CheckCircle, XCircle, RotateCcw, Eye, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { cn } from "@/lib/utils";
+import { cn, formatDate } from "@/lib/utils";
 
 const STATUS_COLORS: Record<string, string> = {
   Draft:     "bg-gray-100 text-gray-700",
@@ -13,13 +13,6 @@ const STATUS_COLORS: Record<string, string> = {
   Approved:  "bg-green-100 text-green-700",
   Rejected:  "bg-red-100 text-red-700",
 };
-
-function formatDate(val: any): string {
-  if (!val) return "—";
-  if (val?.seconds) return new Date(val.seconds * 1000).toLocaleDateString();
-  if (typeof val === "string") return new Date(val).toLocaleDateString();
-  return "—";
-}
 
 export function TimesheetApprovals() {
   const { profile, role } = useAuth();

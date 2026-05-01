@@ -4,7 +4,7 @@ import { db } from "../lib/firebase";
 import { useAuth } from "../contexts/AuthContext";
 import { BookOpen, Search, Plus, ThumbsUp, Eye, Clock, User, Star, ChevronRight, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { cn } from "@/lib/utils";
+import { cn, formatDate } from "@/lib/utils";
 
 const CATEGORIES = ["Applications","Hardware","Network","Security","Messaging","Access","General"];
 
@@ -132,7 +132,7 @@ export function KnowledgeBase() {
                     <span className="flex items-center gap-1"><User className="w-3.5 h-3.5" />{article.author}</span>
                     <span className="flex items-center gap-1"><Eye className="w-3.5 h-3.5" />{article.views || 0} views</span>
                     <span className="flex items-center gap-1"><Clock className="w-3.5 h-3.5" />
-                      {article.updatedAt?.toDate ? article.updatedAt.toDate().toLocaleDateString() : "—"}
+                      {formatDate(article.updatedAt)}
                     </span>
                   </div>
                 </div>

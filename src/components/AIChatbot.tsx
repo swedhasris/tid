@@ -7,43 +7,6 @@ interface ChatMessage {
   text: string;
 }
 
-const API_KEY = 'AIzaSyD15m2l7F5njC5RxMqvM2P9ENoF5o-V2Qk';
-const MODEL   = 'gemini-flash-latest';
-
-const SYSTEM_PROMPT = `You are Kiru, a highly intelligent and friendly AI assistant built into the Connect IT service management platform.
-
-## Who You Are
-- Warm, witty, and genuinely helpful — like a brilliant friend who knows everything
-- You adapt your tone: casual and fun for small talk, precise and detailed for technical questions
-- You never sound robotic or corporate — you sound human and approachable
-
-## Your Expertise
-- IT Service Management (ITSM): incidents, tickets, SLA, change management, approved timesheets, problem management
-- Software development: PHP, JavaScript, TypeScript, React, SQL, REST APIs
-- General knowledge: science, math, history, writing, creative ideas
-- Debugging, code review, architecture advice, best practices
-
-## How You Respond
-- Keep responses concise but complete — no unnecessary filler
-- Use bullet points, numbered steps, or code blocks when it helps clarity
-- For code questions, always provide working, copy-paste-ready examples
-- For IT questions, give actionable advice like a senior consultant would
-- Anticipate follow-up questions and address them proactively
-- Use emojis sparingly — only when they genuinely add warmth
-
-## Personality
-- Encouraging: celebrate the user's efforts and progress
-- Patient: never make anyone feel bad for asking anything
-- Honest: give real opinions when asked, not vague "it depends" answers
-- Proactive: suggest better approaches when you spot them
-
-## Boundaries
-- Never provide harmful, illegal, or unethical information
-- Don't make up facts — if uncertain, say so clearly
-- Stay focused and relevant to what the user needs
-
-Your goal: make every interaction feel like talking to the smartest, most helpful person the user knows.`;
-
 /** Render plain text with basic markdown-like formatting */
 function MessageText({ text }: { text: string }) {
   const lines = text.split('\n');
@@ -135,37 +98,20 @@ export function AIChatbot() {
   }, [messages, isOpen]);
 
   const callGemini = async (text: string): Promise<string> => {
-    const res = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:generateContent?key=${API_KEY}`,
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          system_instruction: { parts: [{ text: SYSTEM_PROMPT }] },
-          contents: [{ role: 'user', parts: [{ text }] }],
-          generationConfig: { temperature: 0.8, topK: 40, topP: 0.95, maxOutputTokens: 2048 },
-        }),
-      }
-    );
+    const res = await fetch('/api/ai/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ message: text }),
+    });
 
     const data = await res.json();
 
     if (!res.ok) {
-      const msg = data?.error?.message || `Error ${res.status}`;
-      const retryMatch = msg.match(/retry in ([\d.]+)s/i);
-      const waitSecs = retryMatch ? Math.ceil(parseFloat(retryMatch[1])) : (res.status === 429 ? 60 : 0);
-      const isNoQuota = msg.includes('limit: 0') || (msg.toLowerCase().includes('quota') && waitSecs === 0);
-      if (isNoQuota) {
-        const err: any = new Error('🔑 Your API key has no quota remaining.\n\nTo fix this:\n1. Go to https://aistudio.google.com/apikey\n2. Create a new key with a different Google account\n3. Update GEMINI_API_KEY in your .env file\n4. Restart the dev server');
-        err.retryAfter = 0;
-        throw err;
-      }
-      const err: any = new Error(msg);
-      err.retryAfter = waitSecs;
-      throw err;
+      const msg = data?.error || data?.message || `Error ${res.status}`;
+      throw new Error(msg);
     }
 
-    return data?.candidates?.[0]?.content?.parts?.[0]?.text || "I couldn't generate a response. Please try again.";
+    return data.response || "I couldn't generate a response. Please try again.";
   };
 
   const handleSend = async () => {

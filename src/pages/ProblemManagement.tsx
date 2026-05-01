@@ -4,7 +4,7 @@ import { db } from "../lib/firebase";
 import { useAuth } from "../contexts/AuthContext";
 import { AlertOctagon, Search, Plus, Clock, User, Activity, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { cn } from "@/lib/utils";
+import { cn, formatDate } from "@/lib/utils";
 
 export function ProblemManagement() {
   const { profile } = useAuth();
@@ -107,7 +107,7 @@ export function ProblemManagement() {
                     {p.assignedTo && <span className="flex items-center gap-1"><User className="w-3.5 h-3.5" />{p.assignedTo}</span>}
                     <span className="flex items-center gap-1"><AlertOctagon className="w-3.5 h-3.5" />{p.incidents || 0} Linked Incidents</span>
                     <span className="flex items-center gap-1"><Clock className="w-3.5 h-3.5" />
-                      {p.createdAt?.toDate ? p.createdAt.toDate().toLocaleDateString() : "—"}
+                      {formatDate(p.createdAt)}
                     </span>
                   </div>
                 </div>

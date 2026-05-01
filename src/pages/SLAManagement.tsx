@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 
 export function SLAManagement() {
   const { profile } = useAuth();
+  const isAdmin = ["admin", "super_admin", "ultra_super_admin"].includes(profile?.role);
   const [policies, setPolicies] = useState<any[]>([]);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [newPolicy, setNewPolicy] = useState({
@@ -57,15 +58,6 @@ export function SLAManagement() {
     }
   };
 
-  if (profile?.role !== "admin") {
-    return (
-      <div className="flex flex-col items-center justify-center h-[60vh] text-center space-y-4">
-        <ShieldAlert className="w-16 h-16 text-muted-foreground opacity-20" />
-        <h2 className="text-2xl font-bold">Access Restricted</h2>
-        <p className="text-muted-foreground">Only administrators can manage SLA policies.</p>
-      </div>
-    );
-  }
 
   return (
     <div className="space-y-6">
@@ -74,9 +66,11 @@ export function SLAManagement() {
           <h1 className="text-3xl font-bold tracking-tight">SLA Management</h1>
           <p className="text-muted-foreground">Define and manage Service Level Agreements.</p>
         </div>
-        <Button onClick={() => setIsModalOpen(true)} className="bg-sn-green text-sn-dark font-bold">
-          <Plus className="w-4 h-4 mr-2" /> Create SLA Policy
-        </Button>
+        {isAdmin && (
+          <Button onClick={() => setIsModalOpen(true)} className="bg-sn-green text-sn-dark font-bold">
+            <Plus className="w-4 h-4 mr-2" /> Create SLA Policy
+          </Button>
+        )}
       </div>
 
       <div className="sn-card p-0 overflow-hidden">
@@ -89,7 +83,7 @@ export function SLAManagement() {
               <th className="data-table-header p-4">Response Time</th>
               <th className="data-table-header p-4">Resolution Time</th>
               <th className="data-table-header p-4">Status</th>
-              <th className="data-table-header p-4">Actions</th>
+              {isAdmin && <th className="data-table-header p-4">Actions</th>}
             </tr>
           </thead>
           <tbody>
@@ -109,11 +103,13 @@ export function SLAManagement() {
                     {policy.isActive ? "Active" : "Inactive"}
                   </span>
                 </td>
-                <td className="p-4">
-                  <Button variant="ghost" size="icon" onClick={() => handleDeletePolicy(policy.id)} className="text-red-600 hover:text-red-700 hover:bg-red-50">
-                    <Trash2 className="w-4 h-4" />
-                  </Button>
-                </td>
+                {isAdmin && (
+                  <td className="p-4">
+                    <Button variant="ghost" size="icon" onClick={() => handleDeletePolicy(policy.id)} className="text-red-600 hover:text-red-700 hover:bg-red-50">
+                      <Trash2 className="w-4 h-4" />
+                    </Button>
+                  </td>
+                )}
               </tr>
             ))}
           </tbody>

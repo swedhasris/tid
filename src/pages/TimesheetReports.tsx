@@ -4,6 +4,7 @@ import { Link, useSearchParams } from "react-router-dom";
 import { useAuth } from "../contexts/AuthContext";
 import { db } from "../lib/firebase";
 import { collection, query, where, getDocs, orderBy } from "firebase/firestore";
+import { formatDate } from "../lib/utils";
 
 export function TimesheetReports() {
   const { user, profile } = useAuth();
@@ -137,7 +138,7 @@ export function TimesheetReports() {
                         <span className={`px-2 py-0.5 rounded text-xs font-semibold ${STATUS_COLORS[ts.status] || STATUS_COLORS.Draft}`}>{ts.status}</span>
                       </td>
                       <td className="p-3 text-sm text-muted-foreground">
-                        {ts.submittedAt ? (ts.submittedAt.seconds ? new Date(ts.submittedAt.seconds * 1000).toLocaleDateString() : new Date(typeof ts.submittedAt === "string" || typeof ts.submittedAt === "number" ? ts.submittedAt : (ts.submittedAt.toDate ? ts.submittedAt.toDate() : ts.submittedAt)).toLocaleDateString()) : "—"}
+                        {formatDate(ts.submittedAt)}
                       </td>
                     </tr>
                   ))}

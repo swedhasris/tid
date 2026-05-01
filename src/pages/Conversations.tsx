@@ -26,7 +26,7 @@ import {
   ChevronLeft
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { cn } from "@/lib/utils";
+import { cn, formatDate } from "@/lib/utils";
 import { useNavigate, useSearchParams } from "react-router-dom";
 
 export function Conversations() {
@@ -268,7 +268,7 @@ export function Conversations() {
             <div className="flex-grow p-6 overflow-y-auto custom-scrollbar flex flex-col gap-4">
               <div className="flex justify-center mb-6">
                 <div className="bg-white px-4 py-1.5 rounded-full shadow-sm border border-border text-[10px] font-bold text-muted-foreground uppercase tracking-wider">
-                  Incident Opened • {selectedTicket?.createdAt ? new Date(selectedTicket.createdAt.toDate?.() || selectedTicket.createdAt).toLocaleDateString() : ""}
+                  Incident Opened • {formatDate(selectedTicket?.createdAt)}
                 </div>
               </div>
 

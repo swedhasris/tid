@@ -7,6 +7,7 @@ import {
   doc, serverTimestamp, orderBy
 } from "firebase/firestore";
 import { Link } from "react-router-dom";
+import { formatDate as formatDateUtils } from "../lib/utils";
 
 const STATUS_COLORS: Record<string, string> = {
   Draft: "bg-gray-100 text-gray-700",
@@ -234,7 +235,7 @@ export function Timesheet() {
               Your timesheet for this week has been approved.
               {timesheet?.approvedAt && (
                 <span className="ml-2 text-xs opacity-75">
-                  on {new Date(timesheet.approvedAt?.seconds ? timesheet.approvedAt.seconds * 1000 : timesheet.approvedAt).toLocaleDateString("en-US", { weekday: "long", year: "numeric", month: "long", day: "numeric" })}
+                  on {formatDateUtils(timesheet.approvedAt)}
                 </span>
               )}
             </div>

@@ -1,101 +1,139 @@
 import { useEffect, useState } from "react";
-import { collection, onSnapshot, orderBy, query } from "firebase/firestore";
+import { collection, onSnapshot, query } from "firebase/firestore";
 import { db } from "./firebase";
+
+export type Status = "active" | "inactive";
 
 export type CategoryItem = {
   id: string;
   name: string;
-  isActive?: boolean;
+  description?: string;
+  status: Status;
+  createdAt: any;
+  createdBy: string;
 };
 
 export type SubcategoryItem = {
   id: string;
   name: string;
+  description?: string;
   categoryId: string;
   categoryName?: string;
-  isActive?: boolean;
+  status: Status;
+  createdAt: any;
+  createdBy: string;
 };
 
-export type ServiceItem = {
+export type ServiceProviderItem = {
   id: string;
   name: string;
-  providerName: string;
+  description?: string;
   categoryId: string;
-  categoryName?: string;
   subcategoryId: string;
-  subcategoryName?: string;
-  isActive?: boolean;
+  sla: string;
+  status: Status;
+  createdAt: any;
+  createdBy: string;
 };
 
 export type GroupItem = {
   id: string;
   name: string;
-  members?: string[];
-  categoryIds?: string[];
-  subcategoryIds?: string[];
-  serviceIds?: string[];
-  isActive?: boolean;
+  serviceProviderId: string;
+  shiftTiming?: string;
+  escalationLevel?: string;
+  status: Status;
+  createdAt: any;
+  createdBy: string;
 };
+
+export type GroupMemberItem = {
+  id: string;
+  userId: string;
+  userName: string;
+  userEmail: string;
+  groupId: string;
+  roleInGroup: string;
+  status: Status;
+  createdAt: any;
+  createdBy: string;
+};
+
+export type AuditLog = {
+  id: string;
+  moduleId: string;
+  moduleName: string;
+  action: "create" | "update" | "delete";
+  oldValue: any;
+  newValue: any;
+  performedBy: string;
+  performedByRole: string;
+  timestamp: any;
+};
+
+// Sort client-side so documents without createdAt are still included
+function sortByCreatedAt(a: any, b: any) {
+  const aTime = a.createdAt?.seconds ?? a.createdAt?.toMillis?.() ?? 0;
+  const bTime = b.createdAt?.seconds ?? b.createdAt?.toMillis?.() ?? 0;
+  return aTime - bTime;
+}
 
 export function useServiceCatalog() {
   const [categories, setCategories] = useState<CategoryItem[]>([]);
   const [subcategories, setSubcategories] = useState<SubcategoryItem[]>([]);
-  const [services, setServices] = useState<ServiceItem[]>([]);
+  const [serviceProviders, setServiceProviders] = useState<ServiceProviderItem[]>([]);
   const [groups, setGroups] = useState<GroupItem[]>([]);
+  const [members, setMembers] = useState<GroupMemberItem[]>([]);
 
   useEffect(() => {
+    // NO orderBy — fetch ALL docs and sort client-side
+    // This prevents Firestore from silently dropping docs without createdAt
     const unsubs = [
-      onSnapshot(query(collection(db, "settings_categories"), orderBy("createdAt", "asc")), (snap) => {
-        setCategories(
-          snap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<CategoryItem, "id">) }))
-            .filter((item) => item.isActive !== false)
-        );
+      onSnapshot(query(collection(db, "settings_categories")), (snap) => {
+        const docs = snap.docs.map((d) => ({ id: d.id, ...(d.data() as any) }));
+        docs.sort(sortByCreatedAt);
+        setCategories(docs);
       }),
-      onSnapshot(query(collection(db, "settings_subcategories"), orderBy("createdAt", "asc")), (snap) => {
-        setSubcategories(
-          snap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<SubcategoryItem, "id">) }))
-            .filter((item) => item.isActive !== false)
-        );
+      onSnapshot(query(collection(db, "settings_subcategories")), (snap) => {
+        const docs = snap.docs.map((d) => ({ id: d.id, ...(d.data() as any) }));
+        docs.sort(sortByCreatedAt);
+        setSubcategories(docs);
       }),
-      onSnapshot(query(collection(db, "settings_services"), orderBy("createdAt", "asc")), (snap) => {
-        setServices(
-          snap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<ServiceItem, "id">) }))
-            .filter((item) => item.isActive !== false)
-        );
+      onSnapshot(query(collection(db, "settings_service_providers")), (snap) => {
+        const docs = snap.docs.map((d) => ({ id: d.id, ...(d.data() as any) }));
+        docs.sort(sortByCreatedAt);
+        setServiceProviders(docs);
       }),
-      onSnapshot(query(collection(db, "settings_groups"), orderBy("createdAt", "asc")), (snap) => {
-        setGroups(
-          snap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<GroupItem, "id">) }))
-            .filter((item) => item.isActive !== false)
-        );
+      onSnapshot(query(collection(db, "settings_groups")), (snap) => {
+        const docs = snap.docs.map((d) => ({ id: d.id, ...(d.data() as any) }));
+        docs.sort(sortByCreatedAt);
+        setGroups(docs);
+      }),
+      onSnapshot(query(collection(db, "settings_group_members")), (snap) => {
+        const docs = snap.docs.map((d) => ({ id: d.id, ...(d.data() as any) }));
+        docs.sort(sortByCreatedAt);
+        setMembers(docs);
       }),
     ];
 
-    return () => {
-      unsubs.forEach((unsubscribe) => unsubscribe());
-    };
+    return () => unsubs.forEach((unsubscribe) => unsubscribe());
   }, []);
 
-  return { categories, subcategories, services, groups };
+  return { categories, subcategories, serviceProviders, groups, members };
 }
 
 export function getSubcategoriesForCategory(subcategories: SubcategoryItem[], categoryId: string) {
-  return subcategories.filter((item) => item.categoryId === categoryId);
+  return subcategories.filter((item) => item.categoryId === categoryId && item.status === "active");
 }
 
-export function getServicesForSubcategory(services: ServiceItem[], subcategoryId: string) {
-  return services.filter((item) => item.subcategoryId === subcategoryId);
+export function getServiceProvidersForSubcategory(providers: ServiceProviderItem[], subcategoryId: string) {
+  return providers.filter((item) => item.subcategoryId === subcategoryId && item.status === "active");
 }
 
-export function getGroupsForSelection(groups: GroupItem[], categoryId: string, subcategoryId: string, serviceId: string) {
-  return groups.filter((group) => {
-    const categoryMatch = !group.categoryIds?.length || group.categoryIds.includes(categoryId);
-    const subcategoryMatch = !group.subcategoryIds?.length || group.subcategoryIds.includes(subcategoryId);
-    const serviceMatch = !group.serviceIds?.length || group.serviceIds.includes(serviceId);
-    return categoryMatch && subcategoryMatch && serviceMatch;
-  });
+export function getGroupsForServiceProvider(groups: GroupItem[], serviceProviderId: string) {
+  return groups.filter((group) => group.serviceProviderId === serviceProviderId && group.status === "active");
 }
 
-export function serviceDisplayName(service: Pick<ServiceItem, "name" | "providerName">) {
-  return service.providerName ? `${service.name} - ${service.providerName}` : service.name;
+export function getMembersForGroup(members: GroupMemberItem[], groupId: string) {
+  return members.filter((member) => member.groupId === groupId && member.status === "active");
 }

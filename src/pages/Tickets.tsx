@@ -4,8 +4,8 @@ import { db, handleFirestoreError, OperationType } from "../lib/firebase";
 import { useAuth } from "../contexts/AuthContext";
 import { Plus, Filter, MoreVertical, Search } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { cn } from "@/lib/utils";
-import { getGroupsForSelection, getServicesForSubcategory, getSubcategoriesForCategory, serviceDisplayName, useServiceCatalog } from "../lib/serviceCatalog";
+import { cn, formatDate } from "@/lib/utils";
+import { useServiceCatalog } from "../lib/serviceCatalog";
 
 import { Link, useSearchParams } from "react-router-dom";
 
@@ -64,7 +64,7 @@ function SLATimer({ deadline, metAt, isPaused, onHoldStart, totalPausedTime = 0,
 
 export function Tickets() {
   const { user, profile } = useAuth();
-  const { categories, subcategories, services, groups } = useServiceCatalog();
+  const { categories, subcategories, serviceProviders, groups, members } = useServiceCatalog();
   const [searchParams] = useSearchParams();
   const filter = searchParams.get("filter");
   const action = searchParams.get("action");
@@ -109,10 +109,11 @@ export function Tickets() {
 
   const [assignedTo, setAssignedTo] = useState("");
   const [slaPolicies, setSlaPolicies] = useState<any[]>([]);
-  const visibleCategories = categories.filter((item) => !["cmdb", "it infrastructure"].includes((item.name || "").toLowerCase()));
-  const visibleSubcategories = getSubcategoriesForCategory(subcategories, newTicket.categoryId);
-  const visibleServices = getServicesForSubcategory(services, newTicket.subcategoryId);
-  const visibleGroups = getGroupsForSelection(groups, newTicket.categoryId, newTicket.subcategoryId, newTicket.serviceId);
+  const visibleCategories = categories.filter((item) => item.status === 'active');
+  const visibleSubcategories = subcategories.filter(s => s.categoryId === newTicket.categoryId && s.status === 'active');
+  const visibleProviders = serviceProviders.filter(p => p.subcategoryId === newTicket.subcategoryId && p.status === 'active');
+  const visibleGroups = groups.filter(g => g.serviceProviderId === newTicket.serviceId && g.status === 'active');
+  const visibleMembers = members.filter(m => m.groupId === newTicket.selectedGroupId && m.status === 'active');
 
   useEffect(() => {
     if (!newTicket.categoryId && visibleCategories[0]) {
@@ -125,36 +126,49 @@ export function Tickets() {
   }, [newTicket.categoryId, visibleCategories]);
 
   useEffect(() => {
-    const firstSubcategory = visibleSubcategories[0];
-    if (!firstSubcategory) return;
-    if (!newTicket.subcategoryId || !visibleSubcategories.some((item) => item.id === newTicket.subcategoryId)) {
-      setNewTicket((prev) => ({
+    const firstSub = visibleSubcategories[0];
+    if (newTicket.categoryId && !visibleSubcategories.some(s => s.id === newTicket.subcategoryId)) {
+      setNewTicket(prev => ({
         ...prev,
-        subcategoryId: firstSubcategory.id,
-        subcategory: firstSubcategory.name
+        subcategoryId: firstSub?.id || "",
+        subcategory: firstSub?.name || "",
+        serviceId: "",
+        service: "",
+        assignmentGroup: ""
       }));
     }
-  }, [newTicket.subcategoryId, visibleSubcategories]);
+  }, [newTicket.categoryId, visibleSubcategories]);
 
   useEffect(() => {
-    const firstService = visibleServices[0];
-    if (!firstService) return;
-    if (!newTicket.serviceId || !visibleServices.some((item) => item.id === newTicket.serviceId)) {
-      setNewTicket((prev) => ({
+    const firstProv = visibleProviders[0];
+    if (newTicket.subcategoryId && !visibleProviders.some(p => p.id === newTicket.serviceId)) {
+      setNewTicket(prev => ({
         ...prev,
-        serviceId: firstService.id,
-        service: firstService.name,
-        serviceProvider: firstService.providerName
+        serviceId: firstProv?.id || "",
+        service: firstProv?.name || "",
+        serviceProvider: firstProv?.name || "",
+        assignmentGroup: ""
       }));
     }
-  }, [newTicket.serviceId, visibleServices]);
+  }, [newTicket.subcategoryId, visibleProviders]);
 
   useEffect(() => {
-    if (!visibleGroups.length) return;
-    if (!newTicket.assignmentGroup || !visibleGroups.some((item) => item.name === newTicket.assignmentGroup)) {
-      setNewTicket((prev) => ({ ...prev, assignmentGroup: visibleGroups[0].name }));
+    const firstGroup = visibleGroups[0];
+    if (newTicket.serviceId && !visibleGroups.some(g => g.name === newTicket.assignmentGroup)) {
+      setNewTicket(prev => ({ 
+        ...prev, 
+        assignmentGroup: firstGroup?.name || "",
+        selectedGroupId: firstGroup?.id || ""
+      }));
     }
-  }, [newTicket.assignmentGroup, visibleGroups]);
+  }, [newTicket.serviceId, visibleGroups]);
+
+  useEffect(() => {
+    if (visibleMembers.length > 0 && !newTicket.assignedTo) {
+      // Auto-assign to the first member (or logic can be added for Round Robin)
+      setNewTicket(prev => ({ ...prev, assignedTo: visibleMembers[0].userId }));
+    }
+  }, [visibleMembers]);
 
   useEffect(() => {
     const q = query(collection(db, "sla_policies"), where("isActive", "==", true));
@@ -200,20 +214,6 @@ export function Tickets() {
     });
     return unsubscribe;
   }, []);
-
-  const formatDate = (date: any) => {
-    if (!date) return "-";
-    if (typeof date.toDate === "function") {
-      return date.toDate().toLocaleDateString();
-    }
-    if (typeof date === "string") {
-      return new Date(date).toLocaleDateString();
-    }
-    if (date.seconds) {
-      return new Date(date.seconds * 1000).toLocaleDateString();
-    }
-    return "-";
-  };
 
   const formatDateTime = (date: any) => {
     if (!date) return "-";
@@ -283,66 +283,36 @@ export function Tickets() {
     setSuggestedSolution(null);
 
     try {
-      const apiKey = 'AIzaSyD15m2l7F5njC5RxMqvM2P9ENoF5o-V2Qk';
-
-      // Run classify + description generation in parallel
-      const [classifyRes, descRes] = await Promise.all([
-        // 1. Classify category & priority
-        fetch(
-          `https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-latest:generateContent?key=${apiKey}`,
-          {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              contents: [{ role: 'user', parts: [{ text: `Analyze this IT issue and respond ONLY with valid JSON (no markdown): {"category":"<one of: Network|Software|Hardware|Database|Inquiry / Help>","priority":"<one of: Critical|High|Medium|Low>"}\n\nIssue: "${shortDesc}"` }] }],
-            }),
-          }
-        ),
-        // 2. Generate full description
-        fetch(
-          `https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-latest:generateContent?key=${apiKey}`,
-          {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              contents: [{ role: 'user', parts: [{ text: `You are an IT support specialist. A user reported this issue: "${shortDesc}"\n\nWrite a clear, professional incident description (3-5 sentences) that includes:\n- What the problem is\n- Likely impact on the user\n- Suggested first steps to investigate\n\nWrite in plain text, no bullet points, no markdown.` }] }],
-            }),
-          }
-        ),
+      // Run classify + description generation in parallel using our server endpoints
+      const [classifyRes, suggestRes] = await Promise.all([
+        fetch('/api/ai/classify', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ text: shortDesc }),
+        }),
+        fetch('/api/ai/suggest', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ text: shortDesc }),
+        }),
       ]);
 
-      const classJson = await classifyRes.json();
-      const descJson  = await descRes.json();
+      const classData = await classifyRes.json();
+      const suggestData = await suggestRes.json();
 
-      // Parse classification
-      let category = newTicket.category;
-      let impact   = newTicket.impact;
-      let urgency  = newTicket.urgency;
-      try {
-        const raw  = classJson?.candidates?.[0]?.content?.parts?.[0]?.text || '{}';
-        const clean = raw.replace(/```json|```/g, '').trim();
-        const data  = JSON.parse(clean);
-        if (data.category) category = data.category;
-        if (data.priority) {
-          const p = data.priority;
-          impact  = (p === 'Critical' || p === 'High') ? '1 - High' : p === 'Medium' ? '2 - Medium' : '3 - Low';
-          urgency = impact;
-        }
-      } catch (_) {}
-
-      // Get generated description
-      const generatedDesc = descJson?.candidates?.[0]?.content?.parts?.[0]?.text || '';
+      if (!classifyRes.ok) throw new Error(classData.error || "Classification failed");
+      if (!suggestRes.ok) throw new Error(suggestData.error || "Suggestion failed");
 
       setNewTicket(prev => ({
         ...prev,
-        category,
-        impact,
-        urgency,
-        description: generatedDesc || prev.description,
+        category: classData.category || prev.category,
+        impact: classData.priority === 'Critical' || classData.priority === 'High' ? '1 - High' : classData.priority === 'Medium' ? '2 - Medium' : '3 - Low',
+        urgency: classData.priority === 'Critical' || classData.priority === 'High' ? '1 - High' : classData.priority === 'Medium' ? '2 - Medium' : '3 - Low',
+        description: suggestData.suggestion || prev.description,
       }));
 
-      if (generatedDesc) {
-        setSuggestedSolution(generatedDesc);
+      if (suggestData.suggestion) {
+        setSuggestedSolution(suggestData.suggestion);
       }
     } catch (e) {
       console.error(e);
@@ -696,20 +666,20 @@ export function Tickets() {
                     <select
                       value={newTicket.serviceId}
                       onChange={e => {
-                        const service = visibleServices.find((item) => item.id === e.target.value);
+                        const service = visibleProviders.find((item) => item.id === e.target.value);
                         setNewTicket({
                           ...newTicket,
                           serviceId: e.target.value,
                           service: service?.name || "",
-                          serviceProvider: service?.providerName || "",
+                          serviceProvider: service?.name || "",
                           assignmentGroup: ""
                         });
                       }}
                       className="col-span-2 p-1.5 border border-border rounded text-xs focus:ring-1 focus:ring-sn-green outline-none h-8"
                     >
                       <option value="">-- Select Service --</option>
-                      {visibleServices.map((item) => (
-                        <option key={item.id} value={item.id}>{serviceDisplayName(item)}</option>
+                      {visibleProviders.map((item) => (
+                        <option key={item.id} value={item.id}>{item.name}</option>
                       ))}
                     </select>
                   </div>
@@ -762,14 +732,16 @@ export function Tickets() {
                     <label className="text-[11px] text-right font-medium text-muted-foreground uppercase leading-tight">Assignment group</label>
                     <select
                       value={newTicket.assignmentGroup}
-                      onChange={e => setNewTicket({...newTicket, assignmentGroup: e.target.value})}
+                      onChange={e => {
+                        const group = visibleGroups.find(g => g.name === e.target.value);
+                        setNewTicket({...newTicket, assignmentGroup: e.target.value, selectedGroupId: group?.id || ""});
+                      }}
                       className="col-span-2 p-1.5 border border-border rounded text-xs outline-none focus:ring-1 focus:ring-sn-green h-8"
                     >
                       <option value="">-- Auto Assign --</option>
-                      <option value="Service Desk">Service Desk</option>
                       {visibleGroups.map((item) => (
                         <option key={item.id} value={item.name}>
-                          {item.name}{item.members?.length ? ` (${item.members.join(", ")})` : ""}
+                          {item.name}
                         </option>
                       ))}
                     </select>
@@ -781,9 +753,9 @@ export function Tickets() {
                       onChange={e => setNewTicket({...newTicket, assignedTo: e.target.value})}
                       className="col-span-2 p-1.5 border border-border rounded text-xs focus:ring-1 focus:ring-sn-green h-8"
                     >
-                      <option value="">-- None --</option>
-                      {agents.map(agent => (
-                        <option key={agent.id} value={agent.id}>{agent.name}</option>
+                      <option value="">-- Select Member --</option>
+                      {visibleMembers.map(m => (
+                        <option key={m.id} value={m.userId}>{m.userName}</option>
                       ))}
                     </select>
                   </div>

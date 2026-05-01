@@ -123,6 +123,7 @@ export function Sidebar() {
         { icon: ShoppingCart, label: "Service Catalog", path: "/catalog" },
         { icon: BookOpen, label: "Knowledge Base", path: "/kb" },
         { icon: HelpCircle, label: "My Approvals & Requests", path: "/approvals" },
+        { icon: Clock, label: "SLA Policies", path: "/sla" },
         { icon: History, label: "System Activity Log", path: "/history" },
       ]
     },
@@ -152,7 +153,6 @@ export function Sidebar() {
       items: [
         { icon: Users, label: "Logins", path: "/users" },
         { icon: KeyRound, label: "Access Control", path: "/access-control" },
-        { icon: Clock, label: "SLA Policies", path: "/sla" },
         { icon: Settings2, label: "System Settings", path: "/settings" },
         { icon: ClipboardList, label: "Timesheet Approvals", path: "/timesheet/approvals" },
       ]
