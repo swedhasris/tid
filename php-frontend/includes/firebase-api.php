@@ -1,6 +1,7 @@
 <?php
 /**
  * Firebase Firestore REST API Client for PHP Frontend
+ * Works with API key (no service account required)
  */
 
 require_once __DIR__ . '/config.php';
@@ -8,76 +9,63 @@ require_once __DIR__ . '/config.php';
 class FirebaseAPI {
     private ?string $accessToken = null;
     private int $tokenExpiry = 0;
-    private array $serviceAccount;
+    private bool $useServiceAccount = false;
 
     public function __construct() {
         global $serviceAccount;
-        if (!$serviceAccount) {
-            throw new Exception('Service account not configured');
+        // Use service account if available, otherwise fall back to API key
+        if ($serviceAccount && !empty($serviceAccount['client_email'])) {
+            $this->useServiceAccount = true;
         }
-        $this->serviceAccount = $serviceAccount;
     }
 
     /**
-     * Get OAuth2 access token using service account
+     * Get OAuth2 access token using service account (if available)
      */
-    private function getAccessToken(): string {
+    private function getAccessToken(): ?string {
+        if (!$this->useServiceAccount) return null;
+
+        global $serviceAccount;
         if ($this->accessToken && time() < $this->tokenExpiry - 60) {
             return $this->accessToken;
         }
 
-        $clientEmail = $this->serviceAccount['client_email'] ?? '';
-        $privateKey = $this->serviceAccount['private_key'] ?? '';
-
-        if (!$clientEmail || !$privateKey) {
-            throw new Exception('Service account credentials missing');
-        }
+        $clientEmail = $serviceAccount['client_email'] ?? '';
+        $privateKey  = $serviceAccount['private_key']  ?? '';
+        if (!$clientEmail || !$privateKey) return null;
 
         $now = time();
         $jwtHeader = json_encode(['alg' => 'RS256', 'typ' => 'JWT']);
         $jwtClaims = json_encode([
-            'iss' => $clientEmail,
-            'sub' => $clientEmail,
+            'iss'   => $clientEmail,
+            'sub'   => $clientEmail,
             'scope' => 'https://www.googleapis.com/auth/datastore',
-            'aud' => 'https://oauth2.googleapis.com/token',
-            'iat' => $now,
-            'exp' => $now + 3600,
+            'aud'   => 'https://oauth2.googleapis.com/token',
+            'iat'   => $now,
+            'exp'   => $now + 3600,
         ]);
 
-        $base64Header = str_replace(['+', '/', '='], ['-', '_', ''], base64_encode($jwtHeader));
-        $base64Claims = str_replace(['+', '/', '='], ['-', '_', ''], base64_encode($jwtClaims));
-        $signatureInput = $base64Header . '.' . $base64Claims;
-
-        $signature = '';
-        if (!openssl_sign($signatureInput, $signature, $privateKey, 'SHA256')) {
-            throw new Exception('Failed to sign JWT');
-        }
-
-        $base64Signature = str_replace(['+', '/', '='], ['-', '_', ''], base64_encode($signature));
-        $jwt = $signatureInput . '.' . $base64Signature;
-
-        $postData = http_build_query([
-            'grant_type' => 'urn:ietf:params:oauth:grant-type:jwt-bearer',
-            'assertion' => $jwt,
-        ]);
+        $b64h = str_replace(['+','/','='], ['-','_',''], base64_encode($jwtHeader));
+        $b64c = str_replace(['+','/','='], ['-','_',''], base64_encode($jwtClaims));
+        $sig  = '';
+        if (!openssl_sign("$b64h.$b64c", $sig, $privateKey, 'SHA256')) return null;
+        $b64s = str_replace(['+','/','='], ['-','_',''], base64_encode($sig));
+        $jwt  = "$b64h.$b64c.$b64s";
 
         $ch = curl_init('https://oauth2.googleapis.com/token');
-        curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-        curl_setopt($ch, CURLOPT_POST, true);
-        curl_setopt($ch, CURLOPT_POSTFIELDS, $postData);
-        curl_setopt($ch, CURLOPT_HTTPHEADER, ['Content-Type: application/x-www-form-urlencoded']);
-        $response = curl_exec($ch);
-        $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        curl_setopt_array($ch, [
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_POST           => true,
+            CURLOPT_POSTFIELDS     => http_build_query(['grant_type' => 'urn:ietf:params:oauth:grant-type:jwt-bearer', 'assertion' => $jwt]),
+            CURLOPT_HTTPHEADER     => ['Content-Type: application/x-www-form-urlencoded'],
+        ]);
+        $resp = curl_exec($ch);
+        $code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
         curl_close($ch);
 
-        if ($httpCode !== 200) {
-            throw new Exception("OAuth failed: HTTP {$httpCode}");
-        }
-
-        $data = json_decode($response, true);
-        if (!isset($data['access_token'])) {
-            throw new Exception('No access token in response');
-        }
+        if ($code !== 200) return null;
+        $data = json_decode($resp, true);
+        if (!isset($data['access_token'])) return null;
 
         $this->accessToken = $data['access_token'];
         $this->tokenExpiry = $now + ($data['expires_in'] ?? 3600);
@@ -85,33 +73,38 @@ class FirebaseAPI {
     }
 
     /**
-     * Make authenticated request to Firestore
+     * Build URL — append API key if no service account
+     */
+    private function buildUrl(string $path): string {
+        $base = "https://firestore.googleapis.com/v1/projects/" . FIREBASE_PROJECT_ID . "/databases/" . FIREBASE_DATABASE_ID;
+        $url  = $base . $path;
+        if (!$this->useServiceAccount) {
+            $sep  = str_contains($url, '?') ? '&' : '?';
+            $url .= $sep . 'key=' . urlencode(FIREBASE_API_KEY);
+        }
+        return $url;
+    }
+
+    /**
+     * Make request to Firestore
      */
     private function request(string $method, string $url, ?array $body = null): array {
-        $token = $this->getAccessToken();
-        $headers = [
-            "Authorization: Bearer {$token}",
-            'Content-Type: application/json',
-        ];
+        $headers = ['Content-Type: application/json'];
+        $token   = $this->getAccessToken();
+        if ($token) $headers[] = "Authorization: Bearer {$token}";
 
         $ch = curl_init($url);
-        curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-        curl_setopt($ch, CURLOPT_CUSTOMREQUEST, $method);
-        curl_setopt($ch, CURLOPT_HTTPHEADER, $headers);
-        if ($body !== null) {
-            curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode($body));
-        }
+        curl_setopt_array($ch, [
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_CUSTOMREQUEST  => $method,
+            CURLOPT_HTTPHEADER     => $headers,
+            CURLOPT_SSL_VERIFYPEER => false,
+        ]);
+        if ($body !== null) curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode($body));
         $response = curl_exec($ch);
         curl_close($ch);
 
         return json_decode($response, true) ?? [];
-    }
-
-    /**
-     * Get Firestore base URL
-     */
-    private function getBaseUrl(): string {
-        return "https://firestore.googleapis.com/v1/projects/" . FIREBASE_PROJECT_ID . "/databases/" . FIREBASE_DATABASE_ID;
     }
 
     /**
@@ -198,7 +191,7 @@ class FirebaseAPI {
      * List documents in a collection
      */
     public function listDocuments(string $collection, int $limit = 1000): array {
-        $url = $this->getBaseUrl() . "/documents/{$collection}?pageSize={$limit}";
+        $url = $this->buildUrl("/documents/{$collection}?pageSize={$limit}");
         $result = $this->request('GET', $url);
         $documents = [];
         if (isset($result['documents'])) {
@@ -213,7 +206,7 @@ class FirebaseAPI {
      * Get a single document
      */
     public function getDocument(string $collection, string $docId): ?array {
-        $url = $this->getBaseUrl() . "/documents/{$collection}/{$docId}";
+        $url = $this->buildUrl("/documents/{$collection}/{$docId}");
         $result = $this->request('GET', $url);
         if (isset($result['error'])) return null;
         return self::fromFirestoreDocument($result);
@@ -223,10 +216,9 @@ class FirebaseAPI {
      * Create a document
      */
     public function createDocument(string $collection, array $data, ?string $docId = null): array {
-        $url = $this->getBaseUrl() . "/documents/{$collection}";
-        if ($docId) {
-            $url .= "?documentId=" . urlencode($docId);
-        }
+        $path = "/documents/{$collection}";
+        if ($docId) $path .= "?documentId=" . urlencode($docId);
+        $url = $this->buildUrl($path);
         $body = self::toFirestoreDocument($data);
         $result = $this->request('POST', $url, $body);
         return self::fromFirestoreDocument($result);
@@ -236,15 +228,13 @@ class FirebaseAPI {
      * Update a document
      */
     public function updateDocument(string $collection, string $docId, array $data): void {
-        $url = $this->getBaseUrl() . "/documents/{$collection}/{$docId}";
         $fieldPaths = array_keys($data);
-        if (!empty($fieldPaths)) {
-            $params = [];
-            foreach ($fieldPaths as $fp) {
-                $params[] = 'updateMask.fieldPaths=' . urlencode($fp);
-            }
-            $url .= '?' . implode('&', $params);
+        $params = [];
+        foreach ($fieldPaths as $fp) {
+            $params[] = 'updateMask.fieldPaths=' . urlencode($fp);
         }
+        $path = "/documents/{$collection}/{$docId}" . (!empty($params) ? '?' . implode('&', $params) : '');
+        $url  = $this->buildUrl($path);
         $body = self::toFirestoreDocument($data);
         $this->request('PATCH', $url, $body);
     }
@@ -253,7 +243,7 @@ class FirebaseAPI {
      * Delete a document
      */
     public function deleteDocument(string $collection, string $docId): void {
-        $url = $this->getBaseUrl() . "/documents/{$collection}/{$docId}";
+        $url = $this->buildUrl("/documents/{$collection}/{$docId}");
         $this->request('DELETE', $url);
     }
 
@@ -299,7 +289,7 @@ class FirebaseAPI {
             ];
         }
 
-        $url = $this->getBaseUrl() . "/documents:runQuery";
+        $url  = $this->buildUrl("/documents:runQuery");
         $body = ['structuredQuery' => $structuredQuery];
         $result = $this->request('POST', $url, $body);
 

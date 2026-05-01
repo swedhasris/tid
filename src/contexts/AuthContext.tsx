@@ -2,16 +2,23 @@ import React, { createContext, useContext, useEffect, useState } from "react";
 import { onAuthStateChanged, User, signInAnonymously, signOut as firebaseSignOut } from "firebase/auth";
 import { doc, onSnapshot, setDoc, serverTimestamp } from "firebase/firestore";
 import { auth, db, handleFirestoreError, OperationType } from "../lib/firebase";
+import { Role, ROLE_HIERARCHY, Permissions } from "../lib/roles";
 
 interface AuthContextType {
   user: User | null;
   profile: any | null;
   loading: boolean;
-  demoLogin: (role: 'admin' | 'agent' | 'user') => Promise<void>;
+  role: Role;
+  can: typeof Permissions;
+  demoLogin: () => Promise<void>;
   signOut: () => Promise<void>;
 }
 
-const AuthContext = createContext<AuthContextType>({ user: null, profile: null, loading: true });
+const AuthContext = createContext<AuthContextType>({
+  user: null, profile: null, loading: true,
+  role: "user", can: Permissions,
+  demoLogin: async () => {}, signOut: async () => {},
+});
 
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [user, setUser] = useState<User | null>(null);
@@ -40,14 +47,17 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     if (demoUserStr) {
       try {
         const demoUser = JSON.parse(demoUserStr);
-        setUser({
-          uid: demoUser.uid,
-          email: demoUser.email,
-          displayName: demoUser.name,
-        } as User);
-        setProfile(demoUser);
-        setLoading(false);
-        return () => {};
+        // Accept any valid demo user regardless of role
+        if (demoUser.uid && demoUser.role) {
+          setUser({
+            uid: demoUser.uid,
+            email: demoUser.email,
+            displayName: demoUser.name,
+          } as User);
+          setProfile(demoUser);
+          setLoading(false);
+          return () => {};
+        }
       } catch (e) {
         localStorage.removeItem('demo_user');
       }
@@ -103,7 +113,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   }, []);
 
   // Demo login function that works without Firebase Auth
-  const demoLogin = async (role: 'admin' | 'agent' | 'user') => {
+  const demoLogin = async () => {
+    const demoProfile = {
+      name: "Demo",
+      email: "demo-admin@connectit.local",
+      role: "admin" as const
+    };
+
     try {
       // Try Firebase anonymous auth first
       const result = await signInAnonymously(auth);
@@ -113,30 +129,30 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       const docRef = doc(db, "users", user.uid);
       await setDoc(docRef, {
         uid: user.uid,
-        name: `Demo ${role.charAt(0).toUpperCase() + role.slice(1)}`,
-        email: `demo-${role}@connectit.local`,
-        role: role,
+        name: demoProfile.name,
+        email: demoProfile.email,
+        role: demoProfile.role,
         createdAt: serverTimestamp()
       });
       
       // Also store in localStorage as backup
       localStorage.setItem('demo_user', JSON.stringify({
         uid: user.uid,
-        name: `Demo ${role.charAt(0).toUpperCase() + role.slice(1)}`,
-        email: `demo-${role}@connectit.local`,
-        role: role
+        name: demoProfile.name,
+        email: demoProfile.email,
+        role: demoProfile.role
       }));
       
     } catch (err: any) {
       // If Firebase fails, use localStorage mock mode
       console.warn("Firebase auth failed, using local demo mode:", err);
       
-      const mockUid = 'demo_' + role + '_' + Date.now();
+      const mockUid = 'demo_admin_' + Date.now();
       const mockUser = {
         uid: mockUid,
-        name: `Demo ${role.charAt(0).toUpperCase() + role.slice(1)}`,
-        email: `demo-${role}@connectit.local`,
-        role: role,
+        name: demoProfile.name,
+        email: demoProfile.email,
+        role: demoProfile.role,
         isDemo: true
       };
       
@@ -145,8 +161,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       // Manually set the user state
       setUser({
         uid: mockUid,
-        email: `demo-${role}@connectit.local`,
-        displayName: `Demo ${role.charAt(0).toUpperCase() + role.slice(1)}`,
+        email: demoProfile.email,
+        displayName: demoProfile.name,
       } as User);
       setProfile(mockUser);
     }
@@ -165,7 +181,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   return (
-    <AuthContext.Provider value={{ user, profile, loading, demoLogin, signOut }}>
+    <AuthContext.Provider value={{ user, profile, loading, role: (profile?.role || "user") as Role, can: Permissions, demoLogin, signOut }}>
       {children}
     </AuthContext.Provider>
   );

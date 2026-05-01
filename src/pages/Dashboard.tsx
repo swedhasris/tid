@@ -1,164 +1,265 @@
 import React, { useEffect, useState } from "react";
-import { collection, query, onSnapshot, where, limit } from "firebase/firestore";
-import { db, handleFirestoreError, OperationType } from "../lib/firebase";
+import { collection, onSnapshot, query } from "firebase/firestore";
+import { db } from "../lib/firebase";
 import { useAuth } from "../contexts/AuthContext";
-import { 
-  RotateCcw, 
-  Info, 
-  Edit2, 
-  MoreVertical, 
-  ChevronDown,
-  HelpCircle,
-  MessageSquare,
-  Ticket as TicketIcon,
-  Clock,
-  Search,
-  ChevronLeft
-} from "lucide-react";
-import { Button } from "@/components/ui/button";
-import { cn } from "@/lib/utils";
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell } from "recharts";
+import { RefreshCw, LayoutGrid } from "lucide-react";
 import { Link } from "react-router-dom";
 
-export function Dashboard() {
-  const { user, profile } = useAuth();
-  const [searchTerm, setSearchTerm] = useState("");
-  const [dashboardStats, setDashboardStats] = useState({
-    notViewedYear: 0,
-    notViewedSixMonths: 0,
-    deactivated30Days: 0,
-    updatedLast30Days: 4,
-  });
+const PRIORITY_COLORS: Record<string, string> = {
+  "1 - Critical": "#e74c3c",
+  "2 - High":     "#f39c12",
+  "3 - Moderate": "#27ae60",
+  "4 - Low":      "#3498db",
+};
 
-  const dashboards = [
-    { id: 1, name: "Analytics Usage Overview", description: "", active: true, views: 0 },
-    { id: 2, name: "Application Services Dashboard", description: "", active: true, views: 0 },
-    { id: 3, name: "Asset Overview", description: "", active: true, views: 0 },
-    { id: 4, name: "Change Request", description: "View the change request workflows status", active: true, views: 0 },
-    { id: 5, name: "Data Classification", description: "Data classification dashboard", active: true, views: 0 },
-    { id: 6, name: "Gen AI Actions Dashboard", description: "", active: true, views: 0 },
-    { id: 7, name: "Guided Tours - Operational Dashboard", description: "The Guided Tours Overview dashboard provides visibility...", active: true, views: 0 },
-    { id: 8, name: "Incident Management", description: "View the process metrics for Open and Resolved incidents", active: true, views: 0 },
-    { id: 9, name: "Instance Scan Results Next Experience Dashboard", description: "Instance Scan Results Next Experience Dashboard", active: true, views: 0 },
-    { id: 10, name: "Interaction", description: "View the distribution and process metrics for interactions", active: true, views: 0 },
+export function Dashboard() {
+  const { profile } = useAuth();
+  const [tickets, setTickets] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [lastRefresh, setLastRefresh] = useState(new Date());
+
+  useEffect(() => {
+    const unsub = onSnapshot(query(collection(db, "tickets")), snap => {
+      setTickets(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+      setLoading(false);
+      setLastRefresh(new Date());
+    });
+    return unsub;
+  }, []);
+
+  const now = Date.now();
+  const thirtyDaysAgo = now - 30 * 24 * 3600 * 1000;
+  const sevenDaysAgo  = now - 7  * 24 * 3600 * 1000;
+
+  const getTs = (t: any) => {
+    const c = t.createdAt;
+    if (!c) return 0;
+    if (c?.seconds) return c.seconds * 1000;
+    if (typeof c === "string") return new Date(c).getTime();
+    return 0;
+  };
+
+  const open    = tickets.filter(t => !["Resolved","Closed","Canceled"].includes(t.status ?? ""));
+  const closed  = tickets.filter(t => ["Resolved","Closed"].includes(t.status ?? ""));
+
+  // Stats
+  const criticalOpen   = open.filter(t => (t.priority ?? "").includes("Critical")).length;
+  const unassigned     = open.filter(t => !t.assignedTo).length;
+  const overdue        = open.filter(t => t.resolutionDeadline && new Date(t.resolutionDeadline).getTime() < now).length;
+  const openCount      = open.length;
+  const stale7         = open.filter(t => getTs(t) < sevenDaysAgo).length;
+  const older30        = open.filter(t => getTs(t) < thirtyDaysAgo).length;
+
+  // Group open by priority for bar chart
+  const priorityGroups = ["1 - Critical","2 - High","3 - Moderate","4 - Low"].map(p => ({
+    name: p.replace(" - ", "\n"),
+    label: p,
+    count: open.filter(t => t.priority === p).length,
+  }));
+
+  // Group older-30 by priority
+  const older30Groups = ["1 - Critical","2 - High","3 - Moderate","4 - Low"].map(p => ({
+    name: p.replace(" - ", "\n"),
+    label: p,
+    count: open.filter(t => t.priority === p && getTs(t) < thirtyDaysAgo).length,
+  }));
+
+  // Recent tickets table
+  const recent = [...tickets]
+    .sort((a, b) => getTs(b) - getTs(a))
+    .slice(0, 8);
+
+  const statCards = [
+    { label: "Critical Open Incidents",        value: criticalOpen, color: "text-foreground", link: "/tickets?filter=open" },
+    { label: "Unassigned Incidents",           value: unassigned,   color: "text-foreground", link: "/tickets?filter=unassigned" },
+    { label: "Overdue Incidents",              value: overdue,      color: "text-red-500",    link: "/tickets?filter=open" },
+    { label: "Open Incidents",                 value: openCount,    color: "text-foreground", link: "/tickets?filter=open" },
+    { label: "Incidents not updated for 7 days", value: stale7,    color: "text-foreground", link: "/tickets" },
+    { label: "Open Incidents older than 30 Days", value: older30,  color: "text-foreground", link: "/tickets" },
   ];
 
   return (
-    <div className="space-y-6 max-w-7xl mx-auto py-6">
-      <div className="flex items-center justify-between pb-4 border-b border-border">
+    <div className="space-y-6 max-w-7xl mx-auto">
+
+      {/* Header */}
+      <div className="flex items-center justify-between pb-3 border-b border-border">
+        <h1 className="text-lg font-bold text-foreground">Incident Overview</h1>
         <div className="flex items-center gap-2">
-           <h1 className="text-xl font-bold text-sn-dark">Dashboards</h1>
-           <Button variant="ghost" size="icon" className="h-6 w-6"><Info className="w-3.5 h-3.5 text-muted-foreground" /></Button>
-        </div>
-        <div className="flex items-center gap-2">
+          <button
+            onClick={() => setLastRefresh(new Date())}
+            className="flex items-center gap-1.5 px-3 py-1.5 border border-border rounded text-xs font-medium hover:bg-muted transition-colors"
+          >
+            <RefreshCw className="w-3.5 h-3.5" />
+            Refresh
+          </button>
+          <button className="flex items-center gap-1.5 px-3 py-1.5 border border-border rounded text-xs font-medium hover:bg-muted transition-colors">
+            <LayoutGrid className="w-3.5 h-3.5" />
+            Change Layout
+          </button>
+          <span className="text-[10px] text-muted-foreground">
+            Last updated: {lastRefresh.toLocaleTimeString()}
+          </span>
         </div>
       </div>
 
-      {/* Stats Cards Section */}
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-        {[
-          { label: "Not viewed in 1 year", value: dashboardStats.notViewedYear, icon: <RotateCcw className="w-4 h-4" /> },
-          { label: "Not viewed in the last 6 months", value: dashboardStats.notViewedSixMonths, icon: <Clock className="w-4 h-4" /> },
-          { label: "Deactivated for more than 30 days", value: dashboardStats.deactivated30Days, icon: <HelpCircle className="w-4 h-4" /> },
-          { label: "Updated in the last 30 days", value: dashboardStats.updatedLast30Days, icon: <Edit2 className="w-4 h-4" /> },
-        ].map((card, i) => (
-          <div key={i} className="bg-white border border-border rounded-lg p-5 shadow-sm space-y-3">
-             <div className="text-[11px] font-bold text-muted-foreground uppercase tracking-wider">{card.label}</div>
-             <div className="flex items-center gap-2">
-               <span className="text-3xl font-light text-sn-dark">{card.value}</span>
-               {i === 3 && <div className="p-1 bg-sn-green/10 text-sn-green rounded"><Info className="w-3 h-3" /></div>}
-             </div>
-          </div>
-        ))}
+      {/* 6 Stat Cards — 3 columns × 2 rows */}
+      <div className="bg-white border border-border rounded-lg shadow-sm overflow-hidden">
+        <div className="grid grid-cols-3 divide-x divide-border">
+          {statCards.slice(0, 3).map((s, i) => (
+            <Link key={i} to={s.link} className="p-6 text-center hover:bg-muted/10 transition-colors group">
+              <div className="text-sm font-semibold text-foreground mb-2">{s.label}</div>
+              <div className={`text-5xl font-light ${s.color} group-hover:scale-105 transition-transform inline-block`}>
+                {loading ? "—" : s.value}
+              </div>
+            </Link>
+          ))}
+        </div>
+        <div className="grid grid-cols-3 divide-x divide-border border-t border-border">
+          {statCards.slice(3, 6).map((s, i) => (
+            <Link key={i} to={s.link} className="p-6 text-center hover:bg-muted/10 transition-colors group">
+              <div className="text-sm font-semibold text-foreground mb-2">{s.label}</div>
+              <div className={`text-5xl font-light ${s.color} group-hover:scale-105 transition-transform inline-block`}>
+                {loading ? "—" : s.value}
+              </div>
+            </Link>
+          ))}
+        </div>
       </div>
 
-      {/* Main Table Section */}
-      <div className="bg-white border border-border rounded-lg shadow-sm">
-        <div className="p-4 border-b border-border flex items-center justify-between">
-          <div className="flex items-center gap-4">
-             <span className="text-sm font-bold">Count <span className="ml-1 px-1.5 py-0.5 bg-muted rounded text-[11px]">10</span></span>
-             <div className="w-px h-6 bg-border mx-2" />
-             <div className="flex items-center gap-2">
-                <span className="text-[11px] font-bold text-muted-foreground uppercase">Filter by</span>
-                <select className="p-1 border border-border rounded text-[11px] h-7 bg-muted/30">
-                  <option>Category</option>
-                </select>
-                <select className="p-1 border border-border rounded text-[11px] h-7 bg-muted/30">
-                  <option>Select</option>
-                </select>
-             </div>
+      {/* Two Bar Charts */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+
+        {/* Open Incidents Grouped by Priority */}
+        <div className="bg-white border border-border rounded-lg shadow-sm p-5">
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="text-sm font-bold text-foreground">Open Incidents — Grouped by Priority</h3>
           </div>
-          <div className="flex items-center gap-4">
-             <div className="relative">
-                <Search className="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground" />
-                <input 
-                  type="text" 
-                  placeholder="Search by dashboard name or owner"
-                  className="pl-8 pr-4 py-1.5 border border-border rounded text-xs w-64 focus:ring-1 focus:ring-sn-green outline-none"
+          <div className="h-56">
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart data={priorityGroups} layout="vertical" margin={{ left: 10, right: 20 }}>
+                <CartesianGrid strokeDasharray="3 3" horizontal={false} />
+                <XAxis type="number" fontSize={11} allowDecimals={false} />
+                <YAxis type="category" dataKey="label" fontSize={10} width={90} />
+                <Tooltip
+                  formatter={(v: any) => [v, "Tickets"]}
+                  contentStyle={{ fontSize: 11, borderRadius: 6 }}
                 />
-             </div>
-             <div className="flex gap-1">
-                <Button variant="outline" size="sm" className="h-7 px-3 text-[11px] font-bold">Delete</Button>
-                <Button variant="outline" size="sm" className="h-7 px-3 text-[11px] font-bold">Deactivate</Button>
-             </div>
+                <Bar dataKey="count" radius={[0, 4, 4, 0]}>
+                  {priorityGroups.map((entry, i) => (
+                    <Cell key={i} fill={PRIORITY_COLORS[entry.label] || "#64748b"} />
+                  ))}
+                </Bar>
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+          {/* Legend */}
+          <div className="flex flex-wrap gap-3 mt-3">
+            {Object.entries(PRIORITY_COLORS).map(([label, color]) => (
+              <div key={label} className="flex items-center gap-1.5 text-[10px]">
+                <div className="w-3 h-3 rounded-sm" style={{ background: color }} />
+                <span>{label}</span>
+              </div>
+            ))}
           </div>
         </div>
 
+        {/* Open Incidents Older than 30 Days */}
+        <div className="bg-white border border-border rounded-lg shadow-sm p-5">
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="text-sm font-bold text-foreground">Open Incidents older than 30 Days — Grouped</h3>
+          </div>
+          <div className="h-56">
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart data={older30Groups} layout="vertical" margin={{ left: 10, right: 20 }}>
+                <CartesianGrid strokeDasharray="3 3" horizontal={false} />
+                <XAxis type="number" fontSize={11} allowDecimals={false} />
+                <YAxis type="category" dataKey="label" fontSize={10} width={90} />
+                <Tooltip
+                  formatter={(v: any) => [v, "Tickets"]}
+                  contentStyle={{ fontSize: 11, borderRadius: 6 }}
+                />
+                <Bar dataKey="count" radius={[0, 4, 4, 0]}>
+                  {older30Groups.map((entry, i) => (
+                    <Cell key={i} fill={PRIORITY_COLORS[entry.label] || "#64748b"} />
+                  ))}
+                </Bar>
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+          <div className="flex flex-wrap gap-3 mt-3">
+            {Object.entries(PRIORITY_COLORS).map(([label, color]) => (
+              <div key={label} className="flex items-center gap-1.5 text-[10px]">
+                <div className="w-3 h-3 rounded-sm" style={{ background: color }} />
+                <span>{label}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      {/* Recent Incidents Table */}
+      <div className="bg-white border border-border rounded-lg shadow-sm overflow-hidden">
+        <div className="p-4 border-b border-border flex items-center justify-between bg-muted/10">
+          <h3 className="text-sm font-bold">Recent Incidents</h3>
+          <Link to="/tickets" className="text-xs text-blue-600 hover:underline font-medium">View All →</Link>
+        </div>
         <div className="overflow-x-auto">
-          <table className="w-full text-left border-collapse">
+          <table className="w-full text-left">
             <thead>
-              <tr className="bg-muted/10 border-b border-border">
-                <th className="p-3 text-[10px] font-bold uppercase text-muted-foreground tracking-tight w-10">
-                  <input type="checkbox" className="w-3 h-3 h-8" />
-                </th>
-                <th className="p-3 text-[10px] font-bold uppercase text-muted-foreground tracking-tight">Name</th>
-                <th className="p-3 text-[10px] font-bold uppercase text-muted-foreground tracking-tight">Description</th>
-                <th className="p-3 text-[10px] font-bold uppercase text-muted-foreground tracking-tight">Active</th>
-                <th className="p-3 text-[10px] font-bold uppercase text-muted-foreground tracking-tight">Views</th>
-              </tr>
-              <tr className="border-b border-border">
-                <td className="p-2"></td>
-                <td className="p-2"><input placeholder="Search" className="w-full p-1 border border-border rounded text-[11px] outline-none focus:ring-1 focus:ring-sn-green" /></td>
-                <td className="p-2"><input placeholder="Search" className="w-full p-1 border border-border rounded text-[11px] outline-none focus:ring-1 focus:ring-sn-green" /></td>
-                <td className="p-2"><input placeholder="Search" className="w-full p-1 border border-border rounded text-[11px] outline-none focus:ring-1 focus:ring-sn-green" /></td>
-                <td className="p-2"><input placeholder="Search" className="w-full p-1 border border-border rounded text-[11px] outline-none focus:ring-1 focus:ring-sn-green" /></td>
+              <tr className="bg-muted/30 border-b border-border text-[10px] font-bold uppercase text-muted-foreground tracking-wide">
+                <th className="p-3">Number</th>
+                <th className="p-3">Short Description</th>
+                <th className="p-3">Priority</th>
+                <th className="p-3">State</th>
+                <th className="p-3">Category</th>
+                <th className="p-3">Assigned To</th>
+                <th className="p-3">Created</th>
               </tr>
             </thead>
             <tbody>
-              {dashboards.map((db, idx) => (
-                <tr key={db.id} className="border-b border-border hover:bg-muted/5 transition-colors">
-                  <td className="p-3"><input type="checkbox" className="w-3 h-3 h-8" /></td>
-                  <td className="p-3 text-[11px] font-bold text-blue-600 cursor-pointer hover:underline">{db.name}</td>
-                  <td className="p-3 text-[11px] text-muted-foreground max-w-xs truncate">{db.description || ""}</td>
-                  <td className="p-3">
-                    <div className="flex items-center gap-2">
-                       <div className="w-8 h-4 bg-sn-green rounded-full relative cursor-pointer">
-                         <div className="absolute right-0.5 top-0.5 w-3 h-3 bg-white rounded-full" />
-                       </div>
-                       <span className="text-[10px] font-bold text-sn-green">True</span>
-                    </div>
-                  </td>
-                  <td className="p-3 text-[11px]">{db.views}</td>
-                </tr>
-              ))}
+              {loading ? (
+                <tr><td colSpan={7} className="p-8 text-center text-muted-foreground text-sm">Loading...</td></tr>
+              ) : recent.length === 0 ? (
+                <tr><td colSpan={7} className="p-8 text-center text-muted-foreground text-sm">No incidents found.</td></tr>
+              ) : recent.map(t => {
+                const p = t.priority ?? "4 - Low";
+                const pColor = p.includes("Critical") ? "bg-red-100 text-red-700"
+                             : p.includes("High")     ? "bg-orange-100 text-orange-700"
+                             : p.includes("Moderate") ? "bg-blue-100 text-blue-700"
+                             : "bg-green-100 text-green-700";
+                const sColor = ["Resolved","Closed"].includes(t.status) ? "bg-green-100 text-green-700"
+                             : t.status === "In Progress" ? "bg-blue-100 text-blue-700"
+                             : t.status === "On Hold"     ? "bg-purple-100 text-purple-700"
+                             : "bg-gray-100 text-gray-700";
+                const ts = getTs(t);
+                return (
+                  <tr key={t.id} className="border-b border-border hover:bg-muted/5 transition-colors">
+                    <td className="p-3">
+                      <Link to={`/tickets/${t.id}`} className="font-mono text-[11px] font-bold text-blue-600 hover:underline">
+                        {t.number ?? t.id.slice(0,8)}
+                      </Link>
+                    </td>
+                    <td className="p-3 text-[11px] font-medium max-w-[200px] truncate">{t.title ?? "—"}</td>
+                    <td className="p-3">
+                      <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${pColor}`}>{p}</span>
+                    </td>
+                    <td className="p-3">
+                      <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${sColor}`}>{t.status ?? "New"}</span>
+                    </td>
+                    <td className="p-3 text-[11px]">{t.category ?? "—"}</td>
+                    <td className="p-3 text-[11px]">{t.assignedTo ? t.assignedTo.slice(0,8)+"…" : <span className="text-muted-foreground italic">Unassigned</span>}</td>
+                    <td className="p-3 text-[11px] text-muted-foreground">
+                      {ts ? new Date(ts).toLocaleDateString() : "—"}
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>
-        
-        <div className="p-3 border-t border-border flex items-center justify-between text-[11px]">
-           <div className="text-muted-foreground">Showing 1-10 of 10</div>
-           <div className="flex items-center gap-4">
-              <div className="flex items-center gap-1">
-                 <Button variant="ghost" size="sm" className="h-6 w-6 p-0"><ChevronLeft className="w-3 h-3" /></Button>
-                 <span className="px-2 font-bold bg-muted rounded">1</span>
-                 <Button variant="ghost" size="sm" className="h-6 w-6 p-0 disabled:opacity-30">2</Button>
-                 <Button variant="ghost" size="sm" className="h-6 w-6 p-0 disabled:opacity-30">3</Button>
-                 <Button variant="ghost" size="sm" className="h-6 w-6 p-0"><MoreVertical className="w-3 h-3 rotate-90" /></Button>
-              </div>
-              <div className="text-muted-foreground">Records per page: 20</div>
-           </div>
-        </div>
       </div>
+
     </div>
   );
 }
-

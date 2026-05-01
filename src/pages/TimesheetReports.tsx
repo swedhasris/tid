@@ -1,12 +1,13 @@
 import React, { useState, useEffect } from "react";
 import { BarChart2, ArrowLeft } from "lucide-react";
-import { Link } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import { useAuth } from "../contexts/AuthContext";
 import { db } from "../lib/firebase";
 import { collection, query, where, getDocs, orderBy } from "firebase/firestore";
 
 export function TimesheetReports() {
   const { user, profile } = useAuth();
+  const [searchParams] = useSearchParams();
   const [timesheets, setTimesheets] = useState<any[]>([]);
   const [allCards, setAllCards] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
@@ -48,6 +49,9 @@ export function TimesheetReports() {
     Rejected: "bg-red-100 text-red-700",
   };
 
+  const statusFilter = searchParams.get("status");
+  const visibleTimesheets = statusFilter ? timesheets.filter((item) => item.status === statusFilter) : timesheets;
+
   return (
     <div className="space-y-6 max-w-6xl mx-auto">
       <div className="flex items-center justify-between pb-4 border-b border-border">
@@ -57,7 +61,9 @@ export function TimesheetReports() {
           </Link>
           <div>
             <h1 className="text-2xl font-bold text-sn-dark">Timesheet Reports</h1>
-            <p className="text-sm text-muted-foreground">Analytics for your logged hours</p>
+            <p className="text-sm text-muted-foreground">
+              {statusFilter ? `${statusFilter} timesheets only` : "Analytics for your logged hours"}
+            </p>
           </div>
         </div>
       </div>
@@ -121,9 +127,9 @@ export function TimesheetReports() {
                   </tr>
                 </thead>
                 <tbody>
-                  {timesheets.length === 0 ? (
+                  {visibleTimesheets.length === 0 ? (
                     <tr><td colSpan={4} className="p-8 text-center text-muted-foreground">No timesheets yet.</td></tr>
-                  ) : timesheets.map(ts => (
+                  ) : visibleTimesheets.map(ts => (
                     <tr key={ts.id} className="border-b border-border hover:bg-muted/10">
                       <td className="p-3 text-sm font-medium">{ts.weekStart} → {ts.weekEnd}</td>
                       <td className="p-3 text-right font-bold">{(ts.totalHours || 0).toFixed(2)} hrs</td>
@@ -131,7 +137,7 @@ export function TimesheetReports() {
                         <span className={`px-2 py-0.5 rounded text-xs font-semibold ${STATUS_COLORS[ts.status] || STATUS_COLORS.Draft}`}>{ts.status}</span>
                       </td>
                       <td className="p-3 text-sm text-muted-foreground">
-                        {ts.submittedAt ? new Date(ts.submittedAt.seconds * 1000).toLocaleDateString() : "—"}
+                        {ts.submittedAt ? (ts.submittedAt.seconds ? new Date(ts.submittedAt.seconds * 1000).toLocaleDateString() : new Date(typeof ts.submittedAt === "string" || typeof ts.submittedAt === "number" ? ts.submittedAt : (ts.submittedAt.toDate ? ts.submittedAt.toDate() : ts.submittedAt)).toLocaleDateString()) : "—"}
                       </td>
                     </tr>
                   ))}

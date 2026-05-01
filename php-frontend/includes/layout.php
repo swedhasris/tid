@@ -95,13 +95,14 @@ function renderLayout(string $title, callable $contentCallback, ?array $extraDat
                     [
                         'label' => 'Incident',
                         'items' => [
-                            ['icon' => 'plus-circle', 'label' => 'Create New Incident', 'page' => 'tickets', 'params' => 'action=new'],
-                            ['icon' => 'user-check', 'label' => 'Assigned to Me', 'page' => 'tickets', 'params' => 'filter=assigned_to_me'],
-                            ['icon' => 'folder-open', 'label' => 'Open Incidents', 'page' => 'tickets', 'params' => 'filter=open', 'badge' => $openTicketsCount],
-                            ['icon' => 'user-minus', 'label' => 'Open - Unassigned', 'page' => 'tickets', 'params' => 'filter=unassigned'],
-                            ['icon' => 'check-circle', 'label' => 'Resolved', 'page' => 'tickets', 'params' => 'filter=resolved'],
-                            ['icon' => 'list', 'label' => 'All Incidents', 'page' => 'tickets'],
-                            ['icon' => 'map', 'label' => 'Critical Map', 'page' => 'reports'],
+                            ['icon' => 'plus-circle',   'label' => 'Create New Incident',  'page' => 'tickets', 'params' => 'action=new'],
+                            ['icon' => 'user-check',    'label' => 'Assigned to Me',        'page' => 'my_tickets'],
+                            ['icon' => 'folder-open',   'label' => 'Open Incidents',        'page' => 'tickets', 'params' => 'filter=open', 'badge' => $openTicketsCount],
+                            ['icon' => 'user-minus',    'label' => 'Open - Unassigned',     'page' => 'tickets', 'params' => 'filter=unassigned'],
+                            ['icon' => 'check-circle',  'label' => 'Resolved',              'page' => 'tickets', 'params' => 'filter=resolved'],
+                            ['icon' => 'check-circle-2','label' => 'Approved Tickets',      'page' => 'approved_tickets'],
+                            ['icon' => 'list',          'label' => 'All Incidents',         'page' => 'tickets'],
+                            ['icon' => 'map',           'label' => 'Critical Map',          'page' => 'reports'],
                         ]
                     ],
                     [
@@ -123,10 +124,11 @@ function renderLayout(string $title, callable $contentCallback, ?array $extraDat
                     $menuSections[] = [
                         'label' => 'System Administration',
                         'items' => [
-                            ['icon' => 'users', 'label' => 'User Management', 'page' => 'users'],
-                            ['icon' => 'clock', 'label' => 'SLA Policies', 'page' => 'sla'],
-                            ['icon' => 'settings', 'label' => 'Configuration', 'page' => 'settings'],
-                            ['icon' => 'check-square', 'label' => 'Timesheet Approvals', 'page' => 'timesheet_approvals'],
+                            ['icon' => 'users',         'label' => 'User Management',      'page' => 'users'],
+                            ['icon' => 'key-round',     'label' => 'Access Control',        'page' => 'access_control'],
+                            ['icon' => 'clock',         'label' => 'SLA Policies',          'page' => 'sla'],
+                            ['icon' => 'settings',      'label' => 'Configuration',         'page' => 'settings'],
+                            ['icon' => 'check-square',  'label' => 'Timesheet Approvals',   'page' => 'timesheet_approvals'],
                         ]
                     ];
                 }

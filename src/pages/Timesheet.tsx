@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from "react";
-import { Clock, ChevronLeft, ChevronRight, Plus, Pencil, Trash2, CheckCircle, AlertCircle, BarChart2 } from "lucide-react";
+import { Clock, ChevronLeft, ChevronRight, Plus, Pencil, Trash2, CheckCircle, AlertCircle, BarChart2, Lock } from "lucide-react";
 import { useAuth } from "../contexts/AuthContext";
 import { db } from "../lib/firebase";
 import {
@@ -224,6 +224,39 @@ export function Timesheet() {
         </div>
       )}
 
+      {/* Approved banner */}
+      {timesheet?.status === "Approved" && (
+        <div className="bg-green-50 border border-green-300 text-green-800 p-4 rounded-lg flex items-start gap-3">
+          <CheckCircle className="w-5 h-5 mt-0.5 shrink-0 text-green-600" />
+          <div className="flex-grow">
+            <div className="font-bold text-green-700">✅ Timesheet Approved</div>
+            <div className="text-sm mt-1 text-green-600">
+              Your timesheet for this week has been approved.
+              {timesheet?.approvedAt && (
+                <span className="ml-2 text-xs opacity-75">
+                  on {new Date(timesheet.approvedAt?.seconds ? timesheet.approvedAt.seconds * 1000 : timesheet.approvedAt).toLocaleDateString("en-US", { weekday: "long", year: "numeric", month: "long", day: "numeric" })}
+                </span>
+              )}
+            </div>
+          </div>
+          <div className="text-right shrink-0">
+            <div className="text-2xl font-bold text-green-700">{weekTotal.toFixed(2)}</div>
+            <div className="text-xs text-green-600 font-medium">hrs approved</div>
+          </div>
+        </div>
+      )}
+
+      {/* Submitted banner */}
+      {timesheet?.status === "Submitted" && (
+        <div className="bg-blue-50 border border-blue-200 text-blue-700 p-4 rounded-lg flex items-start gap-3">
+          <Clock className="w-5 h-5 mt-0.5 shrink-0" />
+          <div>
+            <div className="font-semibold">Timesheet Submitted — Awaiting Approval</div>
+            <div className="text-sm mt-1 text-blue-600">Your timesheet is under review. You cannot make changes until it is approved or rejected.</div>
+          </div>
+        </div>
+      )}
+
       {/* Week Navigation */}
       <div className="flex items-center justify-between">
         <button onClick={() => setWeekOffset(w => w - 1)} className="flex items-center gap-1 px-3 py-2 border border-border rounded text-sm hover:bg-muted transition-colors">
@@ -247,7 +280,7 @@ export function Timesheet() {
           <div className="w-8 h-8 border-4 border-sn-green border-t-transparent rounded-full animate-spin" />
         </div>
       ) : (
-        <div className="grid grid-cols-7 gap-3">
+        <div className={`grid grid-cols-7 gap-3 ${timesheet?.status === "Approved" ? "opacity-75 pointer-events-none" : ""}`}>
           {weekDays.map(day => {
             const entries = timeCards.filter(c => c.entryDate === day.date);
             const dayTotal = entries.reduce((s, c) => s + (c.hoursWorked || 0), 0);

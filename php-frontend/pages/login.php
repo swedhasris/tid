@@ -274,16 +274,31 @@
 
                 <!-- Demo Login Buttons -->
                 <div class="demo-section">
-                    <p class="demo-title">Demo Access (No Password Required)</p>
-                    <div class="demo-buttons">
-                        <button type="submit" name="demo_login" value="admin" class="btn-demo btn-demo-admin">
-                            Demo Admin
+                    <p class="demo-title">Demo Access — No Password Required</p>
+                    <div style="display:grid;grid-template-columns:1fr 1fr;gap:0.5rem;">
+                        <button type="submit" name="demo_login" value="user"
+                            style="padding:0.6rem;border:1px solid #d1d5db;border-radius:0.5rem;background:#f9fafb;color:#374151;font-size:0.7rem;font-weight:700;cursor:pointer;">
+                            👤 User
                         </button>
-                        <button type="submit" name="demo_login" value="agent" class="btn-demo btn-demo-agent">
-                            Demo Agent
+                        <button type="submit" name="demo_login" value="agent"
+                            style="padding:0.6rem;border:1px solid #bfdbfe;border-radius:0.5rem;background:#eff6ff;color:#1d4ed8;font-size:0.7rem;font-weight:700;cursor:pointer;">
+                            🎧 Agent
                         </button>
-                        <button type="submit" name="demo_login" value="user" class="btn-demo btn-demo-user">
-                            Demo User
+                        <button type="submit" name="demo_login" value="sub_admin"
+                            style="padding:0.6rem;border:1px solid #e9d5ff;border-radius:0.5rem;background:#faf5ff;color:#7c3aed;font-size:0.7rem;font-weight:700;cursor:pointer;">
+                            👁 Sub Admin
+                        </button>
+                        <button type="submit" name="demo_login" value="admin"
+                            style="padding:0.6rem;border:1px solid #fed7aa;border-radius:0.5rem;background:#fff7ed;color:#c2410c;font-size:0.7rem;font-weight:700;cursor:pointer;">
+                            🛡 Admin
+                        </button>
+                        <button type="submit" name="demo_login" value="super_admin"
+                            style="padding:0.6rem;border:1px solid #fecaca;border-radius:0.5rem;background:#fef2f2;color:#b91c1c;font-size:0.7rem;font-weight:700;cursor:pointer;">
+                            👑 Super Admin
+                        </button>
+                        <button type="submit" name="demo_login" value="ultra_super_admin"
+                            style="padding:0.6rem;border:1px solid #fde68a;border-radius:0.5rem;background:linear-gradient(135deg,#fffbeb,#fff7ed);color:#92400e;font-size:0.7rem;font-weight:700;cursor:pointer;">
+                            ⚡ Ultra Super
                         </button>
                     </div>
                 </div>

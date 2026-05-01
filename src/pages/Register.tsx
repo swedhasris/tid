@@ -124,7 +124,10 @@ export function Register() {
             >
               <option value="user">End User</option>
               <option value="agent">Support Agent</option>
+              <option value="sub_admin">Sub Admin</option>
               <option value="admin">Administrator</option>
+              <option value="super_admin">Super Admin</option>
+              <option value="ultra_super_admin">Ultra Super Admin</option>
             </select>
           </div>
 

@@ -32,7 +32,8 @@ import {
   HelpCircle,
   MessageSquare,
   BarChart2,
-  ClipboardList
+  ClipboardList,
+  KeyRound
 } from "lucide-react";
 import { Link, useLocation } from "react-router-dom";
 import { cn } from "@/lib/utils";
@@ -53,6 +54,8 @@ interface MenuItem {
 export function Sidebar() {
   const location = useLocation();
   const { user, profile, signOut } = useAuth();
+  const myRole = (profile?.role || "user") as string;
+  const roleLevel = { user:1, agent:2, sub_admin:3, admin:4, super_admin:5, ultra_super_admin:6 }[myRole] || 1;
   const [searchQuery, setSearchQuery] = useState("");
   const [isCollapsed, setIsCollapsed] = useState(false);
   const [openTicketsCount, setOpenTicketsCount] = useState(0);
@@ -111,6 +114,7 @@ export function Sidebar() {
         { icon: MessageSquare, label: "Conversations", path: "/conversations" },
         { icon: Clock, label: "My Timesheet", path: "/timesheet" },
         { icon: BarChart2, label: "Timesheet Reports", path: "/timesheet/reports" },
+        { icon: CheckCircle2, label: "Approved Timesheet", path: "/timesheet/reports?status=Approved" },
       ]
     },
     {
@@ -131,6 +135,7 @@ export function Sidebar() {
         { icon: UserMinus, label: "Open - Unassigned", path: "/tickets?filter=unassigned" },
         { icon: CheckCircle2, label: "Resolved Incidents", path: "/tickets?filter=resolved" },
         { icon: List, label: "All Incidents", path: "/tickets" },
+        { icon: CheckCircle2, label: "Approved Tickets", path: "/approved-tickets" },
         { icon: Map, label: "Critical Incidents Map", path: "/reports" },
       ]
     },
@@ -142,18 +147,13 @@ export function Sidebar() {
       ]
     },
     {
-      label: "IT Infrastructure",
-      items: [
-        { icon: Database, label: "CMDB Assets", path: "/cmdb" },
-      ]
-    },
-    {
       label: "System Administration",
       adminOnly: true,
       items: [
-        { icon: Users, label: "User Management", path: "/users" },
+        { icon: Users, label: "Logins", path: "/users" },
+        { icon: KeyRound, label: "Access Control", path: "/access-control" },
         { icon: Clock, label: "SLA Policies", path: "/sla" },
-        { icon: Settings2, label: "Incident Configuration", path: "/settings" },
+        { icon: Settings2, label: "System Settings", path: "/settings" },
         { icon: ClipboardList, label: "Timesheet Approvals", path: "/timesheet/approvals" },
       ]
     }
@@ -182,8 +182,8 @@ export function Sidebar() {
   };
 
   const hasAccess = (item: MenuItem) => {
-    if (item.superAdminOnly) return profile?.role === "super_admin";
-    if (item.adminOnly) return profile?.role === "admin" || profile?.role === "super_admin";
+    if (item.superAdminOnly) return roleLevel >= 5;
+    if (item.adminOnly) return roleLevel >= 4;
     return true;
   };
 
@@ -307,5 +307,4 @@ export function Sidebar() {
     </aside>
   );
 }
-
 

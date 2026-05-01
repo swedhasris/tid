@@ -1,0 +1,6 @@
+{
+  "name": "Enterprise ITSM Platform",
+  "description": "A comprehensive full-stack IT Service Management (ITSM) platform featuring Incident, Problem, Change, and Asset Management (CMDB), Service Catalog, SLA tracking, and real-time dashboards.",
+  "requestFramePermissions": [],
+  "majorCapabilities": []
+}

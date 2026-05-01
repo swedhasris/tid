@@ -1,36 +1,63 @@
-import React, { useState } from "react";
-import { 
-  BookOpen, 
-  Search, 
-  ThumbsUp, 
-  Eye, 
-  ChevronRight,
-  Tag,
-  Clock,
-  User,
-  Star
-} from "lucide-react";
+import React, { useState, useEffect } from "react";
+import { collection, onSnapshot, addDoc, serverTimestamp, query, orderBy, updateDoc, doc, increment } from "firebase/firestore";
+import { db } from "../lib/firebase";
+import { useAuth } from "../contexts/AuthContext";
+import { BookOpen, Search, Plus, ThumbsUp, Eye, Clock, User, Star, ChevronRight, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
-const KNOWLEDGE_ARTICLES = [
-  { id: "KB001", title: "How to Connect to Corporate VPN", category: "Network", views: 1250, rating: 4.8, author: "IT Security", updatedAt: "2026-03-15" },
-  { id: "KB002", title: "Setting up Email on Mobile Devices", category: "Messaging", views: 840, rating: 4.5, author: "Service Desk", updatedAt: "2026-04-01" },
-  { id: "KB003", title: "Troubleshooting ERP Login Issues", category: "Applications", views: 2100, rating: 4.2, author: "App Support", updatedAt: "2026-04-10" },
-  { id: "KB004", title: "Password Reset Self-Service Guide", category: "Access", views: 5600, rating: 4.9, author: "Identity Team", updatedAt: "2026-01-20" },
-];
+const CATEGORIES = ["Applications","Hardware","Network","Security","Messaging","Access","General"];
 
 export function KnowledgeBase() {
-  const [articles] = useState(KNOWLEDGE_ARTICLES);
-  const [searchQuery, setSearchQuery] = useState("");
+  const { profile } = useAuth();
+  const [articles, setArticles] = useState<any[]>([]);
+  const [search, setSearch] = useState("");
+  const [category, setCategory] = useState("");
+  const [showModal, setShowModal] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [form, setForm] = useState({ title: "", content: "", category: "General" });
 
-  const filteredArticles = articles.filter(a => 
-    a.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    a.category.toLowerCase().includes(searchQuery.toLowerCase())
+  useEffect(() => {
+    const q = query(collection(db, "kb_articles"), orderBy("views", "desc"));
+    return onSnapshot(q, snap => setArticles(snap.docs.map(d => ({ id: d.id, ...d.data() }))));
+  }, []);
+
+  const handleCreate = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setSaving(true);
+    try {
+      await addDoc(collection(db, "kb_articles"), {
+        ...form,
+        views: 0,
+        rating: 0,
+        votes: 0,
+        author: profile?.name || "Unknown",
+        authorId: profile?.uid || "",
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      });
+      setShowModal(false);
+      setForm({ title: "", content: "", category: "General" });
+    } catch (e) { console.error(e); }
+    setSaving(false);
+  };
+
+  const handleView = async (id: string) => {
+    try { await updateDoc(doc(db, "kb_articles", id), { views: increment(1) }); } catch {}
+  };
+
+  const handleVote = async (id: string) => {
+    try { await updateDoc(doc(db, "kb_articles", id), { votes: increment(1) }); } catch {}
+  };
+
+  const filtered = articles.filter(a =>
+    (a.title?.toLowerCase().includes(search.toLowerCase()) || a.content?.toLowerCase().includes(search.toLowerCase())) &&
+    (!category || a.category === category)
   );
 
   return (
     <div className="space-y-8 max-w-7xl mx-auto">
+      {/* Hero */}
       <div className="text-center space-y-4 py-12 bg-sn-sidebar text-white rounded-2xl shadow-xl relative overflow-hidden">
         <div className="absolute inset-0 bg-gradient-to-br from-sn-green/10 to-transparent pointer-events-none" />
         <h1 className="text-4xl font-light relative z-10">Knowledge Base</h1>
@@ -38,105 +65,126 @@ export function KnowledgeBase() {
         <div className="max-w-2xl mx-auto px-4 relative z-10">
           <div className="relative group">
             <Search className="w-5 h-5 absolute left-4 top-1/2 -translate-y-1/2 text-muted-foreground group-focus-within:text-sn-green transition-colors" />
-            <input 
-              type="text"
-              placeholder="Search for articles, topics, or keywords..."
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-full bg-white text-sn-dark border-none rounded-xl py-4 pl-12 pr-4 text-lg outline-none shadow-2xl focus:ring-2 focus:ring-sn-green transition-all"
-            />
+            <input type="text" placeholder="Search for articles, topics, or keywords..."
+              value={search} onChange={e => setSearch(e.target.value)}
+              className="w-full bg-white text-sn-dark border-none rounded-xl py-4 pl-12 pr-4 text-lg outline-none shadow-2xl focus:ring-2 focus:ring-sn-green transition-all" />
           </div>
         </div>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-4 gap-8">
-        {/* Sidebar Categories */}
-        <div className="space-y-6">
+        {/* Sidebar */}
+        <div className="space-y-4">
           <div className="sn-card p-4">
             <h3 className="text-xs font-bold uppercase tracking-wider text-muted-foreground mb-4">Categories</h3>
             <div className="space-y-1">
-              {["Applications", "Hardware", "Network", "Security", "Messaging", "Access"].map(cat => (
-                <button key={cat} className="w-full flex items-center justify-between px-3 py-2 rounded-lg text-sm text-sn-dark hover:bg-muted/50 transition-colors group">
-                  <span>{cat}</span>
-                  <ChevronRight className="w-3 h-3 text-muted-foreground group-hover:text-sn-green" />
+              <button onClick={() => setCategory("")}
+                className={cn("w-full flex items-center justify-between px-3 py-2 rounded-lg text-sm hover:bg-muted/50 transition-colors",
+                  !category ? "bg-sn-green/10 text-sn-green font-bold" : "text-sn-dark")}>
+                All Articles <span className="text-xs text-muted-foreground">{articles.length}</span>
+              </button>
+              {CATEGORIES.map(cat => (
+                <button key={cat} onClick={() => setCategory(cat === category ? "" : cat)}
+                  className={cn("w-full flex items-center justify-between px-3 py-2 rounded-lg text-sm hover:bg-muted/50 transition-colors",
+                    category === cat ? "bg-sn-green/10 text-sn-green font-bold" : "text-sn-dark")}>
+                  {cat}
+                  <span className="text-xs text-muted-foreground">{articles.filter(a => a.category === cat).length}</span>
                 </button>
               ))}
             </div>
           </div>
-
-          <div className="sn-card p-4 bg-muted/30 border-dashed">
-            <h3 className="text-xs font-bold uppercase tracking-wider text-muted-foreground mb-4">Top Contributors</h3>
-            <div className="space-y-4">
-              {[
-                { name: "Sarah Chen", articles: 42 },
-                { name: "Mike Ross", articles: 28 },
-                { name: "Elena Gilbert", articles: 15 },
-              ].map(user => (
-                <div key={user.name} className="flex items-center gap-3">
-                  <div className="w-8 h-8 bg-sn-green/20 rounded-full flex items-center justify-center text-[10px] font-bold text-sn-green">
-                    {user.name.split(' ').map(n => n[0]).join('')}
-                  </div>
-                  <div>
-                    <div className="text-xs font-bold">{user.name}</div>
-                    <div className="text-[10px] text-muted-foreground">{user.articles} articles</div>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
+          {(profile?.role === "admin" || profile?.role === "agent") && (
+            <Button className="w-full bg-sn-green text-sn-dark font-bold gap-2" onClick={() => setShowModal(true)}>
+              <Plus className="w-4 h-4" /> Write Article
+            </Button>
+          )}
         </div>
 
-        {/* Article List */}
+        {/* Articles */}
         <div className="lg:col-span-3 space-y-4">
-          <div className="flex items-center justify-between mb-2">
-            <h2 className="text-xl font-bold text-sn-dark">Featured Articles</h2>
-            <div className="flex items-center gap-2">
-              <Button variant="ghost" size="sm" className="text-xs">Most Recent</Button>
-              <Button variant="ghost" size="sm" className="text-xs font-bold text-sn-green">Most Viewed</Button>
-            </div>
+          <div className="flex items-center justify-between">
+            <h2 className="text-xl font-bold text-sn-dark">
+              {category ? `${category} Articles` : "All Articles"} ({filtered.length})
+            </h2>
           </div>
-
-          <div className="grid grid-cols-1 gap-4">
-            {filteredArticles.map((article) => (
-              <div key={article.id} className="sn-card p-6 hover:border-sn-green transition-all group cursor-pointer">
-                <div className="flex items-start justify-between gap-4">
-                  <div className="space-y-3 flex-grow">
-                    <div className="flex items-center gap-3">
-                      <span className="text-[10px] font-mono font-bold text-blue-600">{article.id}</span>
+          {filtered.length === 0 ? (
+            <div className="sn-card p-12 text-center text-muted-foreground">
+              {articles.length === 0 ? "No articles yet. Be the first to write one!" : "No articles match your search."}
+            </div>
+          ) : filtered.map(article => (
+            <div key={article.id} className="sn-card p-6 hover:border-sn-green transition-all group cursor-pointer"
+              onClick={() => handleView(article.id)}>
+              <div className="flex items-start justify-between gap-4">
+                <div className="space-y-3 flex-grow">
+                  <div className="flex items-center gap-3 flex-wrap">
+                    <span className="px-2 py-0.5 rounded bg-muted text-[10px] font-bold uppercase text-muted-foreground">{article.category}</span>
+                    {article.votes > 0 && (
                       <div className="flex items-center gap-1 text-[10px] font-bold text-orange-500">
-                        <Star className="w-3 h-3 fill-current" /> {article.rating}
+                        <ThumbsUp className="w-3 h-3" /> {article.votes} helpful
                       </div>
-                      <span className="px-2 py-0.5 rounded bg-muted text-[10px] font-bold uppercase text-muted-foreground">
-                        {article.category}
-                      </span>
-                    </div>
-                    <h3 className="text-xl font-bold text-sn-dark group-hover:text-sn-green transition-colors">
-                      {article.title}
-                    </h3>
-                    <div className="flex items-center gap-6 text-xs text-muted-foreground">
-                      <div className="flex items-center gap-1.5">
-                        <User className="w-3.5 h-3.5" /> {article.author}
-                      </div>
-                      <div className="flex items-center gap-1.5">
-                        <Eye className="w-3.5 h-3.5" /> {article.views} views
-                      </div>
-                      <div className="flex items-center gap-1.5">
-                        <Clock className="w-3.5 h-3.5" /> Updated {article.updatedAt}
-                      </div>
-                    </div>
+                    )}
                   </div>
-                  <div className="flex flex-col items-end gap-4">
-                    <Button variant="ghost" size="icon" className="group-hover:bg-sn-green/10">
-                      <ThumbsUp className="w-4 h-4 text-muted-foreground group-hover:text-sn-green" />
-                    </Button>
-                    <ChevronRight className="w-5 h-5 text-muted-foreground group-hover:text-sn-green transition-all" />
+                  <h3 className="text-xl font-bold text-sn-dark group-hover:text-sn-green transition-colors">{article.title}</h3>
+                  {article.content && (
+                    <p className="text-sm text-muted-foreground line-clamp-2">{article.content}</p>
+                  )}
+                  <div className="flex items-center gap-6 text-xs text-muted-foreground flex-wrap">
+                    <span className="flex items-center gap-1"><User className="w-3.5 h-3.5" />{article.author}</span>
+                    <span className="flex items-center gap-1"><Eye className="w-3.5 h-3.5" />{article.views || 0} views</span>
+                    <span className="flex items-center gap-1"><Clock className="w-3.5 h-3.5" />
+                      {article.updatedAt?.toDate ? article.updatedAt.toDate().toLocaleDateString() : "—"}
+                    </span>
                   </div>
+                </div>
+                <div className="flex flex-col items-end gap-3">
+                  <button onClick={e => { e.stopPropagation(); handleVote(article.id); }}
+                    className="p-2 hover:bg-sn-green/10 rounded-lg transition-colors" title="Mark as helpful">
+                    <ThumbsUp className="w-4 h-4 text-muted-foreground hover:text-sn-green" />
+                  </button>
+                  <ChevronRight className="w-5 h-5 text-muted-foreground group-hover:text-sn-green transition-all" />
                 </div>
               </div>
-            ))}
-          </div>
+            </div>
+          ))}
         </div>
       </div>
+
+      {showModal && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4" onClick={e => e.target === e.currentTarget && setShowModal(false)}>
+          <div className="bg-white rounded-xl shadow-2xl w-full max-w-2xl overflow-hidden">
+            <div className="p-4 border-b border-border flex items-center justify-between bg-muted/30">
+              <h3 className="font-bold">Write Knowledge Article</h3>
+              <button onClick={() => setShowModal(false)} className="p-1 hover:bg-muted rounded"><X className="w-5 h-5" /></button>
+            </div>
+            <form onSubmit={handleCreate} className="p-6 space-y-4">
+              <div>
+                <label className="text-sm font-medium block mb-1">Title <span className="text-red-500">*</span></label>
+                <input required value={form.title} onChange={e => setForm(f => ({...f, title: e.target.value}))}
+                  className="w-full p-2 border border-border rounded text-sm focus:ring-1 focus:ring-sn-green outline-none" />
+              </div>
+              <div>
+                <label className="text-sm font-medium block mb-1">Category</label>
+                <select value={form.category} onChange={e => setForm(f => ({...f, category: e.target.value}))}
+                  className="w-full p-2 border border-border rounded text-sm focus:ring-1 focus:ring-sn-green outline-none">
+                  {CATEGORIES.map(c => <option key={c}>{c}</option>)}
+                </select>
+              </div>
+              <div>
+                <label className="text-sm font-medium block mb-1">Content <span className="text-red-500">*</span></label>
+                <textarea required rows={8} value={form.content} onChange={e => setForm(f => ({...f, content: e.target.value}))}
+                  placeholder="Write the article content here..."
+                  className="w-full p-2 border border-border rounded text-sm focus:ring-1 focus:ring-sn-green outline-none resize-none" />
+              </div>
+              <div className="flex justify-end gap-3 pt-2 border-t border-border">
+                <Button type="button" variant="outline" onClick={() => setShowModal(false)}>Cancel</Button>
+                <Button type="submit" className="bg-sn-green text-sn-dark font-bold" disabled={saving}>
+                  {saving ? "Publishing..." : "Publish Article"}
+                </Button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -151,8 +151,11 @@ try {
                 $resolutionHours = $matchingPolicy['resolutionTimeHours'] ?? 24;
                 
                 $now = time();
-                $responseDeadline = gmdate('c', $now + $responseHours * 3600);
-                $resolutionDeadline = gmdate('c', $now + $resolutionHours * 3600);
+                $responseDeadline   = $now + $responseHours * 3600;
+                // Resolution clock starts after response deadline ends
+                $resolutionDeadline = $responseDeadline + $resolutionHours * 3600;
+                $responseDeadlineStr   = gmdate('c', $responseDeadline);
+                $resolutionDeadlineStr = gmdate('c', $resolutionDeadline);
                 
                 // Auto-assignment
                 $category = $_POST['category'] ?? '';
@@ -202,6 +205,7 @@ try {
                 $ticketData = [
                     'number'              => 'INC' . mt_rand(1000000, 9999999),
                     'caller'              => $_POST['caller'] ?? '',
+                    'affectedUser'        => $_POST['affectedUser'] ?? '',
                     'category'            => $category,
                     'subcategory'         => $_POST['subcategory'] ?? '',
                     'service'             => $_POST['service'] ?? '',
@@ -218,8 +222,8 @@ try {
                     'taskName'            => $linkedTask['name'] ?? '',
                     'status'              => 'New',
                     'createdBy'           => $user['uid'] ?? '',
-                    'responseDeadline'    => $responseDeadline,
-                    'resolutionDeadline'  => $resolutionDeadline,
+                    'responseDeadline'    => $responseDeadlineStr,
+                    'resolutionDeadline'  => $resolutionDeadlineStr,
                     'responseSlaStatus'   => 'In Progress',
                     'resolutionSlaStatus' => 'In Progress',
                     'totalPausedTime'     => 0,
@@ -499,6 +503,126 @@ try {
         case 'timesheet_ajax':
             // AJAX handler - returns JSON, no layout
             include __DIR__ . '/pages/timesheet_ajax.php';
+            break;
+
+        case 'my_tickets':
+            $currentUser = getCurrentUser();
+            $myTickets   = [];
+            $allUsers    = [];
+            try {
+                $allTickets = $api->listDocuments('tickets');
+                $allUsers   = $api->listDocuments('users');
+                $myUid = $currentUser['uid'] ?? '';
+                $myTickets = array_values(array_filter($allTickets, function($t) use ($myUid) {
+                    return ($t['assignedTo'] ?? '') === $myUid || ($t['createdBy'] ?? '') === $myUid;
+                }));
+            } catch (Exception $e) { $myTickets = []; }
+            if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['update_status'])) {
+                $ticketId  = $_POST['ticket_id'] ?? '';
+                $newStatus = $_POST['new_status'] ?? '';
+                if ($ticketId && in_array($newStatus, ['New','In Progress','On Hold','Resolved','Closed'])) {
+                    $cu = getCurrentUser();
+                    $t  = $api->getDocument('tickets', $ticketId);
+                    if ($t && (($t['assignedTo'] ?? '') === ($cu['uid'] ?? '') || isAdmin())) {
+                        $history   = $t['history'] ?? [];
+                        $history[] = ['action' => 'Status changed to ' . $newStatus, 'timestamp' => gmdate('c'), 'user' => $cu['name'] ?? 'System'];
+                        $api->updateDocument('tickets', $ticketId, ['status' => $newStatus, 'history' => $history, 'updatedAt' => gmdate('c')]);
+                        setFlash('success', 'Ticket status updated.');
+                    }
+                }
+                redirect('/my_tickets');
+            }
+            renderLayout('My Assigned Tickets', function($data) use ($myTickets, $allUsers, $currentUser) {
+                include __DIR__ . '/pages/my_tickets.php';
+            });
+            break;
+
+        case 'approved_tickets':
+            $allTickets = [];
+            $allUsers   = [];
+            try {
+                $allTickets = $api->listDocuments('tickets');
+                $allUsers   = $api->listDocuments('users');
+            } catch (Exception $e) {}
+            $approvedTickets = array_values(array_filter($allTickets, function($t) {
+                return in_array($t['status'] ?? '', ['Resolved', 'Closed']);
+            }));
+            usort($approvedTickets, function($a, $b) {
+                $at = is_array($a['updatedAt'] ?? '') ? ($a['updatedAt']['seconds'] ?? 0) : strtotime($a['updatedAt'] ?? '');
+                $bt = is_array($b['updatedAt'] ?? '') ? ($b['updatedAt']['seconds'] ?? 0) : strtotime($b['updatedAt'] ?? '');
+                return $bt <=> $at;
+            });
+            renderLayout('Approved Tickets', function($data) use ($approvedTickets, $allUsers) {
+                include __DIR__ . '/pages/approved_tickets.php';
+            });
+            break;
+
+        case 'access_control':
+            if (!isAdmin()) { setFlash('error', 'Access denied'); redirect('/dashboard'); }
+            $allUsers = [];
+            try { $allUsers = $api->listDocuments('users'); } catch (Exception $e) {}
+            // Handle role/access updates
+            if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+                $targetUid = $_POST['target_uid'] ?? '';
+                $action2   = $_POST['access_action'] ?? '';
+                if ($targetUid) {
+                    $targetUser = $api->getDocument('users', $targetUid);
+                    $targetRole = $targetUser['role'] ?? 'user';
+                    $levels = ROLE_LEVELS;
+                    if (($levels[$targetRole] ?? 1) < getRoleLevel()) {
+                        if ($action2 === 'grant')   $api->updateDocument('users', $targetUid, ['disabled' => false]);
+                        if ($action2 === 'remove')  $api->updateDocument('users', $targetUid, ['disabled' => true]);
+                        if ($action2 === 'role' && isset($_POST['new_role'])) {
+                            $newRole = $_POST['new_role'];
+                            if (($levels[$newRole] ?? 1) < getRoleLevel())
+                                $api->updateDocument('users', $targetUid, ['role' => $newRole]);
+                        }
+                        if ($action2 === 'module_toggle' && isset($_POST['module_key'])) {
+                            $modKey   = $_POST['module_key'];
+                            $allow    = ($_POST['module_allow'] ?? '1') === '1';
+                            $existing = $targetUser['restrictedModules'] ?? [];
+                            if ($allow) {
+                                $existing = array_values(array_filter($existing, fn($m) => $m !== $modKey));
+                            } else {
+                                if (!in_array($modKey, $existing)) $existing[] = $modKey;
+                            }
+                            $api->updateDocument('users', $targetUid, ['restrictedModules' => $existing]);
+                        }
+                        if ($action2 === 'restrict_all') {
+                            $allMods = ['tickets','conversations','catalog','kb','approvals','history','timesheet','timesheet_reports','timesheet_approvals','problem','change','cmdb','reports','sla','users','settings','access_control','approved_tickets'];
+                            $api->updateDocument('users', $targetUid, ['restrictedModules' => $allMods]);
+                        }
+                        if ($action2 === 'allow_all') {
+                            $api->updateDocument('users', $targetUid, ['restrictedModules' => []]);
+                        }
+                        if ($action2 === 'create_user') {
+                            $name  = $_POST['new_name']  ?? '';
+                            $email = $_POST['new_email'] ?? '';
+                            $role  = $_POST['new_role']  ?? 'user';
+                            $pass  = $_POST['new_password'] ?? '';
+                            if ($name && $email && $pass) {
+                                $uid = 'user_' . uniqid();
+                                $api->createDocument('users', [
+                                    'uid'           => $uid,
+                                    'name'          => $name,
+                                    'email'         => $email,
+                                    'role'          => $role,
+                                    'password_hash' => password_hash($pass, PASSWORD_DEFAULT),
+                                    'disabled'      => false,
+                                    'createdBy'     => getCurrentUser()['uid'] ?? '',
+                                    'createdAt'     => gmdate('c'),
+                                ], $uid);
+                                setFlash('success', "User $name created successfully.");
+                            }
+                        }
+                    }
+                }
+                redirect('/access_control');
+            }
+            renderLayout('Access Control', function($data) use ($allUsers) {
+                include __DIR__ . '/pages/access_control.php';
+            });
+            break;
             break;
 
         default:

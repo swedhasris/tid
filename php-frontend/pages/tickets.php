@@ -44,29 +44,46 @@ try {
 }
 
 function calculateSLAStatus($deadline, $metAt, $isPaused) {
-    if ($metAt) return ['status' => 'met', 'display' => 'MET', 'class' => 'text-green-600'];
+    if ($metAt) return ['status' => 'met', 'display' => 'MET ✓', 'class' => 'text-green-600', 'badge' => 'badge-low'];
     
-    $now = time();
+    if (empty($deadline)) return ['status' => 'none', 'display' => '—', 'class' => 'text-muted-foreground', 'badge' => ''];
+
+    $now          = time();
     $deadlineTime = strtotime($deadline);
-    
+
+    if ($deadlineTime === false) return ['status' => 'none', 'display' => '—', 'class' => 'text-muted-foreground', 'badge' => ''];
+
     if ($deadlineTime <= $now) {
-        return ['status' => 'breached', 'display' => 'BREACHED', 'class' => 'text-red-600'];
+        $over = $now - $deadlineTime;
+        $h = floor($over / 3600);
+        $m = floor(($over % 3600) / 60);
+        $s = $over % 60;
+        return ['status' => 'breached', 'display' => sprintf('-%02d:%02d:%02d', $h, $m, $s), 'class' => 'text-red-600 font-mono font-bold', 'badge' => 'badge-critical'];
     }
-    
+
     if ($isPaused) {
-        return ['status' => 'paused', 'display' => 'PAUSED', 'class' => 'text-orange-500'];
+        $diff = $deadlineTime - $now;
+        $h = floor($diff / 3600);
+        $m = floor(($diff % 3600) / 60);
+        $s = $diff % 60;
+        return ['status' => 'paused', 'display' => sprintf('%02d:%02d:%02d', $h, $m, $s), 'class' => 'text-orange-500 font-mono font-bold', 'badge' => 'badge-moderate'];
     }
-    
+
     $diff = $deadlineTime - $now;
     $h = floor($diff / 3600);
     $m = floor(($diff % 3600) / 60);
     $s = $diff % 60;
-    
-    return [
-        'status' => 'active',
-        'display' => sprintf('%02d:%02d:%02d', $h, $m, $s),
-        'class' => 'text-blue-600'
-    ];
+    $display = sprintf('%02d:%02d:%02d', $h, $m, $s);
+
+    // At Risk = less than 20% time remaining
+    $totalTime = $deadlineTime - ($now - ($deadlineTime - $now)); // approximate
+    $pct = ($diff / max($deadlineTime - ($now - 86400), 1)) * 100;
+
+    if ($diff < 3600) { // less than 1 hour = at risk
+        return ['status' => 'at_risk', 'display' => $display, 'class' => 'text-yellow-600 font-mono font-bold', 'badge' => 'badge-high', 'deadline_ts' => $deadlineTime];
+    }
+
+    return ['status' => 'active', 'display' => $display, 'class' => 'text-blue-600 font-mono font-bold', 'badge' => 'badge-low', 'deadline_ts' => $deadlineTime];
 }
 ?>
 <div class="space-y-6">
@@ -115,7 +132,7 @@ function calculateSLAStatus($deadline, $metAt, $isPaused) {
                     <tr class="bg-muted/50 border-b border-border">
                         <th class="data-table-header p-2">Number</th>
                         <th class="data-table-header p-2">Short Description</th>
-                        <th class="data-table-header p-2">Caller</th>
+                        <th class="data-table-header p-2">Reporting User</th>
                         <th class="data-table-header p-2">Priority</th>
                         <th class="data-table-header p-2">State</th>
                         <th class="data-table-header p-2">Category</th>
@@ -163,7 +180,6 @@ function calculateSLAStatus($deadline, $metAt, $isPaused) {
                             }
                             
                             $isPaused = in_array($ticket['status'] ?? '', ['On Hold', 'Waiting for Customer']);
-                            $slaResp = calculateSLAStatus($ticket['responseDeadline'] ?? '', $ticket['firstResponseAt'] ?? '', $isPaused);
                     ?>
                     <tr class="data-table-row border-b border-border">
                         <td class="p-2">
@@ -192,11 +208,32 @@ function calculateSLAStatus($deadline, $metAt, $isPaused) {
                             <?php endif; ?>
                         </td>
                         <td class="p-2">
-                            <div class="flex flex-col gap-0.5 min-w-[80px]">
-                                <span class="text-[9px] uppercase text-muted-foreground font-bold">Response</span>
-                                <span class="text-[11px] font-mono font-bold leading-none <?= $slaResp['class'] ?>">
-                                    <?= $slaResp['display'] ?>
-                                </span>
+                            <div class="flex flex-col gap-1 min-w-[90px]">
+                                <?php
+                                $isPaused = in_array($ticket['status'] ?? '', ['On Hold', 'Waiting for Customer']);
+                                $slaResp = calculateSLAStatus($ticket['responseDeadline'] ?? '', $ticket['firstResponseAt'] ?? '', $isPaused);
+                                $slaRes  = calculateSLAStatus($ticket['resolutionDeadline'] ?? '', $ticket['resolvedAt'] ?? '', $isPaused);
+                                ?>
+                                <div class="flex items-center gap-1">
+                                    <span class="text-[9px] uppercase text-muted-foreground font-bold w-8">Resp</span>
+                                    <span class="text-[11px] font-mono font-bold <?= $slaResp['class'] ?>"
+                                          <?php if (in_array($slaResp['status'], ['active','at_risk']) && !empty($ticket['responseDeadline'])): ?>
+                                          data-deadline="<?= strtotime($ticket['responseDeadline']) ?>"
+                                          data-sla-timer="resp-<?= $ticket['id'] ?>"
+                                          <?php endif; ?>>
+                                        <?= $slaResp['display'] ?>
+                                    </span>
+                                </div>
+                                <div class="flex items-center gap-1">
+                                    <span class="text-[9px] uppercase text-muted-foreground font-bold w-8">Res</span>
+                                    <span class="text-[11px] font-mono font-bold <?= $slaRes['class'] ?>"
+                                          <?php if (in_array($slaRes['status'], ['active','at_risk']) && !empty($ticket['resolutionDeadline'])): ?>
+                                          data-deadline="<?= strtotime($ticket['resolutionDeadline']) ?>"
+                                          data-sla-timer="res-<?= $ticket['id'] ?>"
+                                          <?php endif; ?>>
+                                        <?= $slaRes['display'] ?>
+                                    </span>
+                                </div>
                             </div>
                         </td>
                     </tr>
@@ -226,14 +263,22 @@ function calculateSLAStatus($deadline, $metAt, $isPaused) {
                 <div class="space-y-4">
                     <div class="grid grid-cols-3 items-center gap-4">
                         <label class="text-[11px] text-right font-medium text-muted-foreground uppercase">Number</label>
-                        <input disabled class="col-span-2 p-1.5 bg-muted/30 border border-border rounded text-xs font-mono" value="INC (Auto-generated)" />
+                        <input disabled class="col-span-2 p-1.5 bg-muted/30 border border-border rounded text-xs font-mono" id="incNumber" value="" />
                     </div>
                     <div class="grid grid-cols-3 items-center gap-4">
                         <label class="text-[11px] text-right font-medium uppercase flex items-center justify-end gap-1">
-                            <span class="text-red-500">*</span> Caller
+                            <span class="text-red-500">*</span> Reporting User
                         </label>
                         <div class="col-span-2 flex gap-1">
-                            <input name="caller" required class="flex-grow p-1.5 border border-border rounded text-xs h-8" />
+                            <input name="caller" required placeholder="Who is reporting this?" class="flex-grow p-1.5 border border-border rounded text-xs h-8" />
+                        </div>
+                    </div>
+                    <div class="grid grid-cols-3 items-center gap-4">
+                        <label class="text-[11px] text-right font-medium text-muted-foreground uppercase flex items-center justify-end gap-1">
+                            Affected User
+                        </label>
+                        <div class="col-span-2 flex gap-1">
+                            <input name="affectedUser" placeholder="Who is affected? (if different)" class="flex-grow p-1.5 border border-border rounded text-xs h-8" />
                         </div>
                     </div>
                     <div class="grid grid-cols-3 items-center gap-4">
@@ -257,7 +302,22 @@ function calculateSLAStatus($deadline, $metAt, $isPaused) {
                     </div>
                     <div class="grid grid-cols-3 items-center gap-4">
                         <label class="text-[11px] text-right font-medium text-muted-foreground uppercase">Service</label>
-                        <input name="service" class="col-span-2 p-1.5 border border-border rounded text-xs h-8" />
+                        <select name="service" class="col-span-2 p-1.5 border border-border rounded text-xs h-8">
+                            <option value="">-- Select Service --</option>
+                            <option value="Email Service">Email Service</option>
+                            <option value="VPN / Remote Access">VPN / Remote Access</option>
+                            <option value="Internet Connectivity">Internet Connectivity</option>
+                            <option value="Active Directory / Login">Active Directory / Login</option>
+                            <option value="File Storage / Shared Drive">File Storage / Shared Drive</option>
+                            <option value="Printing Service">Printing Service</option>
+                            <option value="ERP / Business Application">ERP / Business Application</option>
+                            <option value="IT Security">IT Security</option>
+                            <option value="Hardware Repair">Hardware Repair</option>
+                            <option value="Software Installation">Software Installation</option>
+                            <option value="Database Service">Database Service</option>
+                            <option value="Cloud Services">Cloud Services</option>
+                            <option value="Other">Other</option>
+                        </select>
                     </div>
                     <div class="grid grid-cols-3 items-center gap-4">
                         <label class="text-[11px] text-right font-medium text-muted-foreground uppercase">Config Item</label>
@@ -376,6 +436,9 @@ lucide.createIcons();
 function openModal() {
     document.getElementById('createModal').classList.remove('hidden');
     document.body.style.overflow = 'hidden';
+    // Generate preview INC number
+    const num = 'INC' + (Math.floor(1000000 + Math.random() * 9000000));
+    document.getElementById('incNumber').value = num;
 }
 
 function closeModal() {
@@ -461,4 +524,35 @@ function filterColumn(colIndex, value) {
 <?php if ($action === 'new'): ?>
 openModal();
 <?php endif; ?>
+
+// Live SLA countdown for PHP tickets table
+(function() {
+    function updateSlaTimers() {
+        document.querySelectorAll('[data-sla-timer]').forEach(function(el) {
+            var deadlineTs = parseInt(el.getAttribute('data-deadline'), 10);
+            if (!deadlineTs) return;
+            var now = Math.floor(Date.now() / 1000);
+            var diff = deadlineTs - now;
+            if (diff <= 0) {
+                var over = Math.abs(diff);
+                var h = Math.floor(over / 3600);
+                var m = Math.floor((over % 3600) / 60);
+                var s = over % 60;
+                el.textContent = '-' + pad(h) + ':' + pad(m) + ':' + pad(s);
+                el.className = el.className.replace(/text-blue-600|text-yellow-600/g, 'text-red-600');
+            } else {
+                var h = Math.floor(diff / 3600);
+                var m = Math.floor((diff % 3600) / 60);
+                var s = diff % 60;
+                el.textContent = pad(h) + ':' + pad(m) + ':' + pad(s);
+                if (diff < 3600 && !el.className.includes('text-red-600')) {
+                    el.className = el.className.replace('text-blue-600', 'text-yellow-600');
+                }
+            }
+        });
+    }
+    function pad(n) { return String(n).padStart(2, '0'); }
+    updateSlaTimers();
+    setInterval(updateSlaTimers, 1000);
+})();
 </script>

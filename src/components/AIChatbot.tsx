@@ -7,8 +7,8 @@ interface ChatMessage {
   text: string;
 }
 
-const API_KEY = 'AIzaSyB_7g4j9SemDL7MUDoJUCn2EuTQ3xhfCPI';
-const MODEL   = 'gemini-2.0-flash';
+const API_KEY = 'AIzaSyD15m2l7F5njC5RxMqvM2P9ENoF5o-V2Qk';
+const MODEL   = 'gemini-flash-latest';
 
 const SYSTEM_PROMPT = `You are Kiru, a highly intelligent and friendly AI assistant built into the Connect IT service management platform.
 
@@ -18,7 +18,7 @@ const SYSTEM_PROMPT = `You are Kiru, a highly intelligent and friendly AI assist
 - You never sound robotic or corporate — you sound human and approachable
 
 ## Your Expertise
-- IT Service Management (ITSM): incidents, tickets, SLA, change management, CMDB, problem management
+- IT Service Management (ITSM): incidents, tickets, SLA, change management, approved timesheets, problem management
 - Software development: PHP, JavaScript, TypeScript, React, SQL, REST APIs
 - General knowledge: science, math, history, writing, creative ideas
 - Debugging, code review, architecture advice, best practices
@@ -47,32 +47,73 @@ Your goal: make every interaction feel like talking to the smartest, most helpfu
 /** Render plain text with basic markdown-like formatting */
 function MessageText({ text }: { text: string }) {
   const lines = text.split('\n');
-  return (
-    <div className="space-y-1 text-sm leading-relaxed">
-      {lines.map((line, i) => {
-        if (line.startsWith('```')) return null;
-        if (line.startsWith('### ')) return <p key={i} className="font-bold text-base">{line.slice(4)}</p>;
-        if (line.startsWith('## '))  return <p key={i} className="font-bold">{line.slice(3)}</p>;
-        if (line.startsWith('# '))   return <p key={i} className="font-bold text-lg">{line.slice(2)}</p>;
-        if (line.startsWith('- ') || line.startsWith('* ')) {
-          return <p key={i} className="pl-3">• {line.slice(2)}</p>;
-        }
-        if (/^\d+\. /.test(line)) return <p key={i} className="pl-3">{line}</p>;
-        if (line.trim() === '') return <div key={i} className="h-1" />;
-        // Bold **text**
-        const parts = line.split(/(\*\*[^*]+\*\*)/g);
-        return (
-          <p key={i}>
-            {parts.map((part, j) =>
-              part.startsWith('**') && part.endsWith('**')
-                ? <strong key={j}>{part.slice(2, -2)}</strong>
-                : part
-            )}
-          </p>
+  let inCodeBlock = false;
+  let codeLines: string[] = [];
+  const elements: React.ReactNode[] = [];
+
+  const parseBold = (content: string) => {
+    const parts = content.split(/(\*\*[^*]+\*\*)/g);
+    return parts.map((part, j) =>
+      part.startsWith('**') && part.endsWith('**')
+        ? <strong key={j} className="font-bold text-sn-dark dark:text-white">{part.slice(2, -2)}</strong>
+        : part
+    );
+  };
+
+  lines.forEach((line, i) => {
+    if (line.startsWith('```')) {
+      if (inCodeBlock) {
+        elements.push(
+          <pre key={`code-${i}`} className="bg-gray-900 text-gray-100 p-4 rounded-2xl text-xs overflow-x-auto my-3 font-mono border border-gray-700 shadow-xl shadow-black/20">
+            <code>{codeLines.join('\n')}</code>
+          </pre>
         );
-      })}
-    </div>
-  );
+        codeLines = [];
+        inCodeBlock = false;
+      } else {
+        inCodeBlock = true;
+      }
+      return;
+    }
+
+    if (inCodeBlock) {
+      codeLines.push(line);
+      return;
+    }
+
+    if (line.startsWith('### ')) {
+      elements.push(<h3 key={i} className="font-black text-sn-dark dark:text-white text-base mt-4 mb-1">{parseBold(line.slice(4))}</h3>);
+    } else if (line.startsWith('## ')) {
+      elements.push(<h2 key={i} className="font-black text-sn-dark dark:text-white text-lg mt-5 mb-2">{parseBold(line.slice(3))}</h2>);
+    } else if (line.startsWith('# ')) {
+      elements.push(<h1 key={i} className="font-black text-sn-dark dark:text-white text-xl mt-6 mb-3">{parseBold(line.slice(2))}</h1>);
+    } else if (line.startsWith('- ') || line.startsWith('* ')) {
+      elements.push(
+        <div key={i} className="pl-4 flex gap-3 my-1 group">
+          <span className="text-sn-green font-black select-none group-hover:scale-150 transition-transform">•</span>
+          <span className="flex-1">{parseBold(line.slice(2))}</span>
+        </div>
+      );
+    } else if (/^\d+\. /.test(line)) {
+      const match = line.match(/^(\d+\. )(.*)/);
+      elements.push(
+        <div key={i} className="pl-4 flex gap-3 my-1">
+          <span className="text-sn-green font-bold select-none">{match?.[1]}</span>
+          <span className="flex-1">{parseBold(match?.[2] || "")}</span>
+        </div>
+      );
+    } else if (line.trim() === '') {
+      elements.push(<div key={i} className="h-3" />);
+    } else {
+      elements.push(
+        <p key={i} className="leading-relaxed">
+          {parseBold(line)}
+        </p>
+      );
+    }
+  });
+
+  return <div className="space-y-1 text-[13px] text-gray-700 dark:text-gray-300">{elements}</div>;
 }
 
 export function AIChatbot() {

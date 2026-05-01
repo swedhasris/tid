@@ -1,0 +1,312 @@
+import React, { useEffect, useState } from "react";
+import { collection, onSnapshot, query, getDocs, updateDoc, doc, serverTimestamp, orderBy } from "firebase/firestore";
+import { db } from "../lib/firebase";
+import { useAuth } from "../contexts/AuthContext";
+import { ROLE_HIERARCHY } from "../lib/roles";
+import { ShieldAlert, CheckCircle, XCircle, RotateCcw, Eye, X } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
+
+const STATUS_COLORS: Record<string, string> = {
+  Draft:     "bg-gray-100 text-gray-700",
+  Submitted: "bg-blue-100 text-blue-700",
+  Approved:  "bg-green-100 text-green-700",
+  Rejected:  "bg-red-100 text-red-700",
+};
+
+function formatDate(val: any): string {
+  if (!val) return "—";
+  if (val?.seconds) return new Date(val.seconds * 1000).toLocaleDateString();
+  if (typeof val === "string") return new Date(val).toLocaleDateString();
+  return "—";
+}
+
+export function TimesheetApprovals() {
+  const { profile, role } = useAuth();
+  const [timesheets, setTimesheets] = useState<any[]>([]);
+  const [users, setUsers] = useState<Record<string, any>>({});
+  const [statusFilter, setStatusFilter] = useState("Submitted");
+  const [viewTs, setViewTs] = useState<any>(null);
+  const [viewCards, setViewCards] = useState<any[]>([]);
+  const [rejectId, setRejectId] = useState<string | null>(null);
+  const [rejectReason, setRejectReason] = useState("");
+  const [loading, setLoading] = useState(true);
+
+  // Only admin (level 4) and above can approve
+  const canApprove = ROLE_HIERARCHY[role] >= ROLE_HIERARCHY["admin"];
+
+  useEffect(() => {
+    if (!canApprove) return;
+    // Load all users for name lookup
+    getDocs(collection(db, "users")).then(snap => {
+      const map: Record<string, any> = {};
+      snap.docs.forEach(d => { map[d.id] = d.data(); });
+      setUsers(map);
+    });
+    // Live timesheets
+    const q = query(collection(db, "timesheets"), orderBy("updatedAt", "desc"));
+    return onSnapshot(q, snap => {
+      setTimesheets(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+      setLoading(false);
+    });
+  }, [canApprove]);
+
+  if (!canApprove) {
+    return (
+      <div className="flex flex-col items-center justify-center h-[60vh] text-center space-y-4">
+        <ShieldAlert className="w-16 h-16 text-muted-foreground opacity-20" />
+        <h2 className="text-2xl font-bold">Access Restricted</h2>
+        <p className="text-muted-foreground">Timesheet approvals require Administrator access or above.</p>
+        <p className="text-xs text-muted-foreground">Allowed: Admin · Super Admin · Ultra Super Admin</p>
+      </div>
+    );
+  }
+
+  const filtered = timesheets.filter(ts =>
+    statusFilter === "all" ? true : ts.status === statusFilter
+  );
+
+  const counts = {
+    Submitted: timesheets.filter(t => t.status === "Submitted").length,
+    Approved:  timesheets.filter(t => t.status === "Approved").length,
+    Rejected:  timesheets.filter(t => t.status === "Rejected").length,
+    Draft:     timesheets.filter(t => t.status === "Draft").length,
+  };
+
+  const handleApprove = async (tsId: string) => {
+    if (!confirm("Approve this timesheet?")) return;
+    await updateDoc(doc(db, "timesheets", tsId), {
+      status: "Approved",
+      approvedAt: serverTimestamp(),
+      approvedBy: profile?.uid,
+      updatedAt: serverTimestamp(),
+    });
+    // Update all time cards
+    const cards = await getDocs(query(collection(db, "timeCards")));
+    for (const c of cards.docs) {
+      if (c.data().timesheetId === tsId) {
+        await updateDoc(c.ref, { status: "Approved" });
+      }
+    }
+  };
+
+  const handleReject = async () => {
+    if (!rejectId || !rejectReason.trim()) return;
+    await updateDoc(doc(db, "timesheets", rejectId), {
+      status: "Rejected",
+      rejectionReason: rejectReason,
+      updatedAt: serverTimestamp(),
+    });
+    const cards = await getDocs(query(collection(db, "timeCards")));
+    for (const c of cards.docs) {
+      if (c.data().timesheetId === rejectId) {
+        await updateDoc(c.ref, { status: "Rejected" });
+      }
+    }
+    setRejectId(null);
+    setRejectReason("");
+  };
+
+  const handleReopen = async (tsId: string) => {
+    if (!confirm("Reopen this timesheet for editing?")) return;
+    await updateDoc(doc(db, "timesheets", tsId), {
+      status: "Draft",
+      rejectionReason: null,
+      updatedAt: serverTimestamp(),
+    });
+    const cards = await getDocs(query(collection(db, "timeCards")));
+    for (const c of cards.docs) {
+      if (c.data().timesheetId === tsId) {
+        await updateDoc(c.ref, { status: "Draft" });
+      }
+    }
+  };
+
+  const handleView = async (ts: any) => {
+    setViewTs(ts);
+    const cards = await getDocs(query(collection(db, "timeCards")));
+    setViewCards(cards.docs.filter(c => c.data().timesheetId === ts.id).map(c => ({ id: c.id, ...c.data() })));
+  };
+
+  return (
+    <div className="space-y-6 max-w-7xl mx-auto">
+      {/* Header */}
+      <div className="flex items-center justify-between pb-4 border-b border-border">
+        <div>
+          <h1 className="text-2xl font-bold text-sn-dark">Timesheet Approvals</h1>
+          <p className="text-sm text-muted-foreground">Review and approve employee timesheets</p>
+        </div>
+        <select value={statusFilter} onChange={e => setStatusFilter(e.target.value)}
+          className="p-2 border border-border rounded text-sm outline-none focus:ring-1 focus:ring-sn-green">
+          <option value="Submitted">Submitted</option>
+          <option value="Approved">Approved</option>
+          <option value="Rejected">Rejected</option>
+          <option value="Draft">Draft</option>
+          <option value="all">All</option>
+        </select>
+      </div>
+
+      {/* Stats */}
+      <div className="grid grid-cols-4 gap-4">
+        {[
+          { label: "Pending",  value: counts.Submitted, color: "text-blue-600" },
+          { label: "Approved", value: counts.Approved,  color: "text-green-600" },
+          { label: "Rejected", value: counts.Rejected,  color: "text-red-600" },
+          { label: "Draft",    value: counts.Draft,     color: "text-gray-600" },
+        ].map(s => (
+          <div key={s.label} className="bg-white border border-border rounded-lg p-4">
+            <div className="text-xs text-muted-foreground uppercase font-bold">{s.label}</div>
+            <div className={`text-2xl font-bold mt-1 ${s.color}`}>{s.value}</div>
+          </div>
+        ))}
+      </div>
+
+      {/* Table */}
+      <div className="bg-white border border-border rounded-lg shadow-sm overflow-hidden">
+        <div className="p-4 border-b border-border bg-muted/10 text-sm font-bold">
+          Timesheets ({filtered.length})
+        </div>
+        <div className="overflow-x-auto">
+          <table className="w-full text-left">
+            <thead>
+              <tr className="bg-muted/30 border-b border-border text-[10px] font-bold uppercase text-muted-foreground tracking-wide">
+                <th className="p-3">Employee</th>
+                <th className="p-3">Week</th>
+                <th className="p-3">Total Hours</th>
+                <th className="p-3">Status</th>
+                <th className="p-3">Submitted</th>
+                <th className="p-3">Actions</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-border">
+              {loading ? (
+                <tr><td colSpan={6} className="p-8 text-center text-muted-foreground">Loading...</td></tr>
+              ) : filtered.length === 0 ? (
+                <tr><td colSpan={6} className="p-8 text-center text-muted-foreground">No timesheets found.</td></tr>
+              ) : filtered.map(ts => {
+                const user = users[ts.userId] || {};
+                const status = ts.status || "Draft";
+                return (
+                  <tr key={ts.id} className="hover:bg-muted/5 transition-colors">
+                    <td className="p-3">
+                      <div className="font-medium text-sm">{user.name || "Unknown"}</div>
+                      <div className="text-xs text-muted-foreground">{user.email || ""}</div>
+                    </td>
+                    <td className="p-3 text-sm">
+                      <div>{ts.weekStart?.substring?.(0,10) || "—"}</div>
+                      <div className="text-xs text-muted-foreground">to {ts.weekEnd?.substring?.(0,10) || "—"}</div>
+                    </td>
+                    <td className="p-3 font-bold text-sm">{(ts.totalHours || 0).toFixed(2)} hrs</td>
+                    <td className="p-3">
+                      <span className={cn("px-2 py-0.5 rounded text-xs font-bold", STATUS_COLORS[status] || STATUS_COLORS.Draft)}>
+                        {status}
+                      </span>
+                    </td>
+                    <td className="p-3 text-xs text-muted-foreground">{formatDate(ts.submittedAt)}</td>
+                    <td className="p-3">
+                      <div className="flex items-center gap-1.5">
+                        <button onClick={() => handleView(ts)} title="View"
+                          className="p-1.5 border border-border rounded hover:bg-muted transition-colors">
+                          <Eye className="w-3.5 h-3.5" />
+                        </button>
+                        {status === "Submitted" && (
+                          <>
+                            <button onClick={() => handleApprove(ts.id)} title="Approve"
+                              className="p-1.5 bg-green-50 border border-green-200 rounded hover:bg-green-100 text-green-700 transition-colors">
+                              <CheckCircle className="w-3.5 h-3.5" />
+                            </button>
+                            <button onClick={() => { setRejectId(ts.id); setRejectReason(""); }} title="Reject"
+                              className="p-1.5 bg-red-50 border border-red-200 rounded hover:bg-red-100 text-red-700 transition-colors">
+                              <XCircle className="w-3.5 h-3.5" />
+                            </button>
+                          </>
+                        )}
+                        {status === "Rejected" && (
+                          <button onClick={() => handleReopen(ts.id)} title="Reopen"
+                            className="p-1.5 border border-border rounded hover:bg-muted transition-colors">
+                            <RotateCcw className="w-3.5 h-3.5" />
+                          </button>
+                        )}
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {/* View Modal */}
+      {viewTs && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4"
+          onClick={e => e.target === e.currentTarget && setViewTs(null)}>
+          <div className="bg-white rounded-xl shadow-2xl w-full max-w-2xl overflow-hidden">
+            <div className="p-4 border-b border-border flex items-center justify-between bg-muted/30">
+              <h3 className="font-bold">Timesheet Details</h3>
+              <button onClick={() => setViewTs(null)} className="p-1 hover:bg-muted rounded"><X className="w-5 h-5" /></button>
+            </div>
+            <div className="p-6 space-y-4">
+              <div className="grid grid-cols-2 gap-4 text-sm bg-muted/20 p-4 rounded-lg">
+                <div><span className="text-muted-foreground">Status:</span> <span className={cn("px-2 py-0.5 rounded text-xs font-bold ml-1", STATUS_COLORS[viewTs.status] || "")}>{viewTs.status}</span></div>
+                <div><span className="text-muted-foreground">Total:</span> <strong className="ml-1">{(viewTs.totalHours || 0).toFixed(2)} hrs</strong></div>
+                <div><span className="text-muted-foreground">Week:</span> <span className="ml-1">{viewTs.weekStart?.substring?.(0,10)} → {viewTs.weekEnd?.substring?.(0,10)}</span></div>
+                <div><span className="text-muted-foreground">Submitted:</span> <span className="ml-1">{formatDate(viewTs.submittedAt)}</span></div>
+                {viewTs.rejectionReason && <div className="col-span-2 text-red-600"><span className="font-medium">Rejection:</span> {viewTs.rejectionReason}</div>}
+              </div>
+              <div>
+                <h4 className="font-semibold text-sm mb-2">Time Entries ({viewCards.length})</h4>
+                <table className="w-full text-sm border border-border rounded overflow-hidden">
+                  <thead><tr className="bg-muted/30 text-[10px] uppercase font-bold text-muted-foreground">
+                    <th className="p-2 text-left">Date</th>
+                    <th className="p-2 text-left">Task</th>
+                    <th className="p-2 text-right">Hours</th>
+                    <th className="p-2 text-left">Notes</th>
+                  </tr></thead>
+                  <tbody className="divide-y divide-border">
+                    {viewCards.length === 0 ? (
+                      <tr><td colSpan={4} className="p-4 text-center text-muted-foreground">No entries</td></tr>
+                    ) : viewCards.map(c => (
+                      <tr key={c.id}>
+                        <td className="p-2">{c.entryDate?.substring?.(0,10) || "—"}</td>
+                        <td className="p-2 font-medium">{c.task || c.taskId || "—"}</td>
+                        <td className="p-2 text-right font-bold">{(c.hoursWorked || 0).toFixed(1)}</td>
+                        <td className="p-2 text-muted-foreground">{c.description || "—"}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Reject Modal */}
+      {rejectId && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4"
+          onClick={e => e.target === e.currentTarget && setRejectId(null)}>
+          <div className="bg-white rounded-xl shadow-2xl w-full max-w-md overflow-hidden">
+            <div className="p-4 border-b border-border flex items-center justify-between bg-red-50">
+              <h3 className="font-bold text-red-700">Reject Timesheet</h3>
+              <button onClick={() => setRejectId(null)} className="p-1 hover:bg-red-100 rounded"><X className="w-5 h-5" /></button>
+            </div>
+            <div className="p-6 space-y-4">
+              <p className="text-sm text-muted-foreground">Provide a reason — the employee will see this.</p>
+              <textarea rows={3} value={rejectReason} onChange={e => setRejectReason(e.target.value)}
+                placeholder="Enter rejection reason..."
+                className="w-full p-2 border border-red-200 rounded text-sm resize-none focus:ring-1 focus:ring-red-400 outline-none" />
+              <div className="flex justify-end gap-3">
+                <Button variant="outline" onClick={() => setRejectId(null)}>Cancel</Button>
+                <Button onClick={handleReject} disabled={!rejectReason.trim()}
+                  className="bg-red-600 text-white hover:bg-red-700">
+                  <XCircle className="w-4 h-4 mr-2" /> Reject
+                </Button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}

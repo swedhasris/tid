@@ -5,58 +5,56 @@ import { useAuth } from "../contexts/AuthContext";
 import { Plus, Filter, MoreVertical, Search } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import { getGroupsForSelection, getServicesForSubcategory, getSubcategoriesForCategory, serviceDisplayName, useServiceCatalog } from "../lib/serviceCatalog";
 
 import { Link, useSearchParams } from "react-router-dom";
 
-function SLATimer({ deadline, metAt, isPaused, onHoldStart, totalPausedTime = 0, label }: { deadline: string, metAt?: string, isPaused?: boolean, onHoldStart?: string, totalPausedTime?: number, label: string }) {
+function SLATimer({ deadline, metAt, isPaused, onHoldStart, totalPausedTime = 0, label, waitUntil }: { deadline: string, metAt?: string, isPaused?: boolean, onHoldStart?: string, totalPausedTime?: number, label: string, waitUntil?: string | null }) {
   const [displayTime, setDisplayTime] = useState("");
-  const [status, setStatus] = useState<"met" | "breached" | "active" | "paused">("active");
+  const [status, setStatus] = useState<"waiting" | "met" | "breached" | "active" | "paused">("active");
 
   useEffect(() => {
-    if (metAt) {
-      setStatus("met");
-      setDisplayTime("MET");
-      return;
+    if (metAt) { setStatus("met"); setDisplayTime("MET"); return; }
+
+    // Resolution waiting for response — only when waitUntil is explicitly passed as null/empty
+    if (waitUntil !== undefined && (waitUntil === null || waitUntil === "")) {
+      setStatus("waiting"); setDisplayTime("—"); return;
     }
 
-    const timer = setInterval(() => {
+    const deadlineMs = new Date(deadline).getTime();
+    if (isNaN(deadlineMs)) { setDisplayTime("--:--:--"); return; }
+
+    const tick = () => {
       const now = Date.now();
-      const targetTime = new Date(deadline).getTime();
-      const currentNow = isPaused && onHoldStart ? new Date(onHoldStart).getTime() : now;
-      
-      const diff = (targetTime + totalPausedTime) - currentNow;
+      const effectiveNow = (isPaused && onHoldStart) ? new Date(onHoldStart).getTime() : now;
+      const diff = deadlineMs - effectiveNow + (totalPausedTime || 0);
 
       if (diff <= 0) {
         setStatus("breached");
-        setDisplayTime("BREACHED");
+        const over = Math.abs(diff);
+        const h = Math.floor(over / 3600000), m = Math.floor((over % 3600000) / 60000), s = Math.floor((over % 60000) / 1000);
+        setDisplayTime(`-${String(h).padStart(2,"0")}:${String(m).padStart(2,"0")}:${String(s).padStart(2,"0")}`);
       } else {
-        if (isPaused) {
-          setStatus("paused");
-        } else {
-          setStatus("active");
-        }
-        
-        const absDiff = Math.abs(diff);
-        const h = Math.floor(absDiff / (1000 * 60 * 60));
-        const m = Math.floor((absDiff % (1000 * 60 * 60)) / (1000 * 60));
-        const s = Math.floor((absDiff % (1000 * 60)) / 1000);
-        
-        const formatted = `${h.toString().padStart(2, "0")}:${m.toString().padStart(2, "0")}:${s.toString().padStart(2, "0")}`;
-        setDisplayTime(formatted);
+        setStatus(isPaused ? "paused" : "active");
+        const h = Math.floor(diff / 3600000), m = Math.floor((diff % 3600000) / 60000), s = Math.floor((diff % 60000) / 1000);
+        setDisplayTime(`${String(h).padStart(2,"0")}:${String(m).padStart(2,"0")}:${String(s).padStart(2,"0")}`);
       }
-    }, 1000);
+    };
 
+    tick();
+    const timer = setInterval(tick, 1000);
     return () => clearInterval(timer);
-  }, [deadline, metAt, isPaused, onHoldStart, totalPausedTime]);
+  }, [deadline, metAt, isPaused, onHoldStart, totalPausedTime, waitUntil]);
 
   return (
     <div className="flex flex-col gap-0.5 min-w-[80px]">
       <span className="text-[9px] uppercase text-muted-foreground font-bold leading-none">{label}</span>
       <span className={cn(
         "text-[11px] font-mono font-bold leading-none",
-        status === "met" ? "text-green-600" :
-        status === "breached" ? "text-red-600" :
-        status === "paused" ? "text-orange-500" : "text-blue-600"
+        status === "met"     ? "text-green-600" :
+        status === "breached"? "text-red-600" :
+        status === "waiting" ? "text-gray-400" :
+        status === "paused"  ? "text-orange-500" : "text-blue-600"
       )}>
         {displayTime}
       </span>
@@ -66,6 +64,7 @@ function SLATimer({ deadline, metAt, isPaused, onHoldStart, totalPausedTime = 0,
 
 export function Tickets() {
   const { user, profile } = useAuth();
+  const { categories, subcategories, services, groups } = useServiceCatalog();
   const [searchParams] = useSearchParams();
   const filter = searchParams.get("filter");
   const action = searchParams.get("action");
@@ -73,23 +72,32 @@ export function Tickets() {
   const [tickets, setTickets] = useState<any[]>([]);
   const [agents, setAgents] = useState<any[]>([]);
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [previewNumber, setPreviewNumber] = useState("");
+
+  const openModal = () => {
+    setPreviewNumber(`INC${Math.floor(1000000 + Math.random() * 9000000)}`);
+    setIsModalOpen(true);
+  };
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isAiLoading, setIsAiLoading] = useState(false);
   const [suggestedSolution, setSuggestedSolution] = useState<string | null>(null);
 
   useEffect(() => {
     if (action === "new") {
-      setIsModalOpen(true);
+      openModal();
     }
   }, [action]);
 
   const [newTicket, setNewTicket] = useState({ 
     caller: "",
-    category: "Inquiry / Help",
+    category: "",
+    categoryId: "",
     subcategory: "",
+    subcategoryId: "",
     service: "",
+    serviceId: "",
+    serviceProvider: "",
     serviceOffering: "",
-    cmdbItem: "",
     title: "", 
     description: "", 
     channel: "Self-service",
@@ -101,6 +109,52 @@ export function Tickets() {
 
   const [assignedTo, setAssignedTo] = useState("");
   const [slaPolicies, setSlaPolicies] = useState<any[]>([]);
+  const visibleCategories = categories.filter((item) => !["cmdb", "it infrastructure"].includes((item.name || "").toLowerCase()));
+  const visibleSubcategories = getSubcategoriesForCategory(subcategories, newTicket.categoryId);
+  const visibleServices = getServicesForSubcategory(services, newTicket.subcategoryId);
+  const visibleGroups = getGroupsForSelection(groups, newTicket.categoryId, newTicket.subcategoryId, newTicket.serviceId);
+
+  useEffect(() => {
+    if (!newTicket.categoryId && visibleCategories[0]) {
+      setNewTicket((prev) => ({
+        ...prev,
+        categoryId: visibleCategories[0].id,
+        category: visibleCategories[0].name
+      }));
+    }
+  }, [newTicket.categoryId, visibleCategories]);
+
+  useEffect(() => {
+    const firstSubcategory = visibleSubcategories[0];
+    if (!firstSubcategory) return;
+    if (!newTicket.subcategoryId || !visibleSubcategories.some((item) => item.id === newTicket.subcategoryId)) {
+      setNewTicket((prev) => ({
+        ...prev,
+        subcategoryId: firstSubcategory.id,
+        subcategory: firstSubcategory.name
+      }));
+    }
+  }, [newTicket.subcategoryId, visibleSubcategories]);
+
+  useEffect(() => {
+    const firstService = visibleServices[0];
+    if (!firstService) return;
+    if (!newTicket.serviceId || !visibleServices.some((item) => item.id === newTicket.serviceId)) {
+      setNewTicket((prev) => ({
+        ...prev,
+        serviceId: firstService.id,
+        service: firstService.name,
+        serviceProvider: firstService.providerName
+      }));
+    }
+  }, [newTicket.serviceId, visibleServices]);
+
+  useEffect(() => {
+    if (!visibleGroups.length) return;
+    if (!newTicket.assignmentGroup || !visibleGroups.some((item) => item.name === newTicket.assignmentGroup)) {
+      setNewTicket((prev) => ({ ...prev, assignmentGroup: visibleGroups[0].name }));
+    }
+  }, [newTicket.assignmentGroup, visibleGroups]);
 
   useEffect(() => {
     const q = query(collection(db, "sla_policies"), where("isActive", "==", true));
@@ -219,47 +273,80 @@ export function Tickets() {
   };
 
   const handleAIAssist = async () => {
-    const textToAnalyze = newTicket.title || newTicket.description;
-    if (!textToAnalyze) {
-      alert("Please enter a short description or description to use AI.");
+    const shortDesc = newTicket.title;
+    if (!shortDesc) {
+      alert("Please enter a Short Description first, then click Autofill with AI.");
       return;
     }
-    
+
     setIsAiLoading(true);
     setSuggestedSolution(null);
-    try {
-      const [classifyRes, suggestRes] = await Promise.all([
-        fetch('/api/ai/classify', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ text: textToAnalyze })
-        }),
-        fetch('/api/ai/suggest', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ text: textToAnalyze })
-        })
-      ]);
-      
-      const classData = await classifyRes.json();
-      const suggestData = await suggestRes.json();
-      
-      if (classData && !classData.error) {
-        setNewTicket(prev => ({
-          ...prev,
-          category: classData.category || prev.category,
-          impact: classData.priority === 'Critical' || classData.priority === 'High' ? '1 - High' : classData.priority === 'Medium' ? '2 - Medium' : '3 - Low',
-          urgency: classData.priority === 'Critical' || classData.priority === 'High' ? '1 - High' : classData.priority === 'Medium' ? '2 - Medium' : '3 - Low',
-          description: prev.description || `AI Analyzed Issue: ${textToAnalyze}`
-        }));
-      }
 
-      if (suggestData && suggestData.suggestion) {
-        setSuggestedSolution(suggestData.suggestion);
+    try {
+      const apiKey = 'AIzaSyD15m2l7F5njC5RxMqvM2P9ENoF5o-V2Qk';
+
+      // Run classify + description generation in parallel
+      const [classifyRes, descRes] = await Promise.all([
+        // 1. Classify category & priority
+        fetch(
+          `https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-latest:generateContent?key=${apiKey}`,
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              contents: [{ role: 'user', parts: [{ text: `Analyze this IT issue and respond ONLY with valid JSON (no markdown): {"category":"<one of: Network|Software|Hardware|Database|Inquiry / Help>","priority":"<one of: Critical|High|Medium|Low>"}\n\nIssue: "${shortDesc}"` }] }],
+            }),
+          }
+        ),
+        // 2. Generate full description
+        fetch(
+          `https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-latest:generateContent?key=${apiKey}`,
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              contents: [{ role: 'user', parts: [{ text: `You are an IT support specialist. A user reported this issue: "${shortDesc}"\n\nWrite a clear, professional incident description (3-5 sentences) that includes:\n- What the problem is\n- Likely impact on the user\n- Suggested first steps to investigate\n\nWrite in plain text, no bullet points, no markdown.` }] }],
+            }),
+          }
+        ),
+      ]);
+
+      const classJson = await classifyRes.json();
+      const descJson  = await descRes.json();
+
+      // Parse classification
+      let category = newTicket.category;
+      let impact   = newTicket.impact;
+      let urgency  = newTicket.urgency;
+      try {
+        const raw  = classJson?.candidates?.[0]?.content?.parts?.[0]?.text || '{}';
+        const clean = raw.replace(/```json|```/g, '').trim();
+        const data  = JSON.parse(clean);
+        if (data.category) category = data.category;
+        if (data.priority) {
+          const p = data.priority;
+          impact  = (p === 'Critical' || p === 'High') ? '1 - High' : p === 'Medium' ? '2 - Medium' : '3 - Low';
+          urgency = impact;
+        }
+      } catch (_) {}
+
+      // Get generated description
+      const generatedDesc = descJson?.candidates?.[0]?.content?.parts?.[0]?.text || '';
+
+      setNewTicket(prev => ({
+        ...prev,
+        category,
+        impact,
+        urgency,
+        description: generatedDesc || prev.description,
+      }));
+
+      if (generatedDesc) {
+        setSuggestedSolution(generatedDesc);
       }
     } catch (e) {
       console.error(e);
-      alert("Failed to analyze text using AI.");
+      alert("AI autofill failed. Please fill in the description manually.");
     } finally {
       setIsAiLoading(false);
     }
@@ -276,7 +363,7 @@ export function Tickets() {
 
     // Required fields check
     if (!newTicket.caller || !newTicket.title) {
-      alert("Please fill in all required fields (Caller and Short description).");
+      alert("Please fill in all required fields (Reporting User and Short description).");
       return;
     }
 
@@ -293,7 +380,8 @@ export function Tickets() {
 
       const now = Date.now();
       const responseDeadline = new Date(now + (matchingPolicy.responseTimeHours || 4) * 60 * 60 * 1000);
-      const resolutionDeadline = new Date(now + (matchingPolicy.resolutionTimeHours || 24) * 60 * 60 * 1000);
+      // Resolution deadline is from now (full window), but the timer won't start until response is given
+      const resolutionDeadline = new Date(now + ((matchingPolicy.responseTimeHours || 4) + (matchingPolicy.resolutionTimeHours || 24)) * 60 * 60 * 1000);
 
       const ticketNumber = `INC${Math.floor(1000000 + Math.random() * 9000000)}`;
 
@@ -308,16 +396,7 @@ export function Tickets() {
       }
 
       // Workflow Automation: Auto-assignment based on category
-      let assignmentGroup = newTicket.assignmentGroup;
-      if (!assignmentGroup) {
-        switch (newTicket.category) {
-          case "Network": assignmentGroup = "Network Team"; break;
-          case "Hardware": assignmentGroup = "Hardware Support"; break;
-          case "Software": assignmentGroup = "App Support"; break;
-          case "Database": assignmentGroup = "DBA Team"; break;
-          default: assignmentGroup = "Service Desk";
-        }
-      }
+      const assignmentGroup = newTicket.assignmentGroup || visibleGroups[0]?.name || "Service Desk";
 
       const ticketData = {
         ...newTicket,
@@ -347,10 +426,13 @@ export function Tickets() {
       setNewTicket({ 
         caller: "",
         category: "Inquiry / Help",
+        categoryId: "",
         subcategory: "",
+        subcategoryId: "",
         service: "",
+        serviceId: "",
+        serviceProvider: "",
         serviceOffering: "",
-        cmdbItem: "",
         title: "", 
         description: "", 
         channel: "Self-service",
@@ -402,7 +484,7 @@ export function Tickets() {
           <h1 className="text-3xl font-bold tracking-tight">Tickets</h1>
           <p className="text-muted-foreground">Manage and track IT support requests.</p>
         </div>
-        <Button onClick={() => setIsModalOpen(true)} className="bg-sn-green text-sn-dark font-bold">
+        <Button onClick={() => openModal()} className="bg-sn-green text-sn-dark font-bold">
           <Plus className="w-4 h-4 mr-2" /> Create Ticket
         </Button>
       </div>
@@ -429,7 +511,7 @@ export function Tickets() {
               <tr className="bg-muted/50 border-b border-border">
                 <th className="data-table-header p-2 text-[11px] font-bold uppercase tracking-tight">Number</th>
                 <th className="data-table-header p-2 text-[11px] font-bold uppercase tracking-tight">Short Description</th>
-                <th className="data-table-header p-2 text-[11px] font-bold uppercase tracking-tight">Caller</th>
+                <th className="data-table-header p-2 text-[11px] font-bold uppercase tracking-tight">Reporting User</th>
                 <th className="data-table-header p-2 text-[11px] font-bold uppercase tracking-tight">Priority</th>
                 <th className="data-table-header p-2 text-[11px] font-bold uppercase tracking-tight">State</th>
                 <th className="data-table-header p-2 text-[11px] font-bold uppercase tracking-tight">Category</th>
@@ -485,6 +567,15 @@ export function Tickets() {
                           onHoldStart={ticket.onHoldStart}
                           totalPausedTime={ticket.totalPausedTime}
                         />
+                        <SLATimer
+                          label="Res"
+                          deadline={ticket.resolutionDeadline}
+                          metAt={ticket.resolvedAt}
+                          isPaused={ticket.status === "On Hold" || ticket.status === "Waiting for Customer"}
+                          onHoldStart={ticket.onHoldStart}
+                          totalPausedTime={ticket.totalPausedTime}
+                          waitUntil={ticket.firstResponseAt ?? null}
+                        />
                       </div>
                     </td>
                   </tr>
@@ -518,15 +609,18 @@ export function Tickets() {
                 <div className="space-y-4">
                   <div className="grid grid-cols-3 items-center gap-4">
                     <label className="text-[11px] text-right font-medium text-muted-foreground uppercase leading-tight">Number</label>
-                    <input disabled className="col-span-2 p-1.5 bg-muted/30 border border-border rounded text-xs font-mono" value="INC (Auto-generated)" />
+                    <input disabled className="col-span-2 p-1.5 bg-muted/30 border border-border rounded text-xs font-mono"
+                      value={previewNumber}
+                    />
                   </div>
                   <div className="grid grid-cols-3 items-center gap-4">
                     <label className="text-[11px] text-right font-medium uppercase leading-tight flex items-center justify-end gap-1">
-                      <span className="text-red-500">*</span> Caller
+                      <span className="text-red-500">*</span> Reporting User
                     </label>
                     <div className="col-span-2 flex gap-1">
                       <input 
                         required
+                        placeholder="Who is reporting this incident?"
                         value={newTicket.caller}
                         onChange={e => setNewTicket({...newTicket, caller: e.target.value})}
                         className="flex-grow p-1.5 border border-border rounded text-xs focus:ring-1 focus:ring-sn-green outline-none h-8" 
@@ -535,57 +629,89 @@ export function Tickets() {
                     </div>
                   </div>
                   <div className="grid grid-cols-3 items-center gap-4">
+                    <label className="text-[11px] text-right font-medium uppercase leading-tight flex items-center justify-end gap-1">
+                      Affected User
+                    </label>
+                    <div className="col-span-2 flex gap-1">
+                      <input 
+                        placeholder="Who is affected? (if different)"
+                        value={newTicket.affectedUser || ''}
+                        onChange={e => setNewTicket({...newTicket, affectedUser: e.target.value})}
+                        className="flex-grow p-1.5 border border-border rounded text-xs focus:ring-1 focus:ring-sn-green outline-none h-8" 
+                      />
+                      <Button variant="outline" size="sm" className="h-8 w-8 p-0"><Search className="w-3 h-3" /></Button>
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-3 items-center gap-4">
                     <label className="text-[11px] text-right font-medium text-muted-foreground uppercase leading-tight">Category</label>
                     <select 
-                      value={newTicket.category}
+                      value={newTicket.categoryId}
                       onChange={e => {
-                        const cat = e.target.value;
-                        const groupMap: Record<string, string> = {
-                          'Network': 'Network Team',
-                          'Hardware': 'Hardware Support',
-                          'Software': 'App Support',
-                          'Database': 'DBA Team',
-                          'Inquiry / Help': 'Service Desk',
-                        };
-                        setNewTicket({...newTicket, category: cat, assignmentGroup: groupMap[cat] || 'Service Desk'});
+                        const category = visibleCategories.find((item) => item.id === e.target.value);
+                        setNewTicket({
+                          ...newTicket,
+                          categoryId: e.target.value,
+                          category: category?.name || "",
+                          subcategoryId: "",
+                          subcategory: "",
+                          serviceId: "",
+                          service: "",
+                          serviceProvider: "",
+                          assignmentGroup: ""
+                        });
                       }}
                       className="col-span-2 p-1.5 border border-border rounded text-xs focus:ring-1 focus:ring-sn-green outline-none h-8"
                     >
-                      <option>Inquiry / Help</option>
-                      <option>Software</option>
-                      <option>Hardware</option>
-                      <option>Network</option>
-                      <option>Database</option>
+                      {visibleCategories.map((item) => (
+                        <option key={item.id} value={item.id}>{item.name}</option>
+                      ))}
                     </select>
                   </div>
                   <div className="grid grid-cols-3 items-center gap-4">
                     <label className="text-[11px] text-right font-medium text-muted-foreground uppercase leading-tight">Subcategory</label>
                     <select 
-                      value={newTicket.subcategory}
-                      onChange={e => setNewTicket({...newTicket, subcategory: e.target.value})}
+                      value={newTicket.subcategoryId}
+                      onChange={e => {
+                        const subcategory = visibleSubcategories.find((item) => item.id === e.target.value);
+                        setNewTicket({
+                          ...newTicket,
+                          subcategoryId: e.target.value,
+                          subcategory: subcategory?.name || "",
+                          serviceId: "",
+                          service: "",
+                          serviceProvider: "",
+                          assignmentGroup: ""
+                        });
+                      }}
                       className="col-span-2 p-1.5 border border-border rounded text-xs focus:ring-1 focus:ring-sn-green outline-none h-8"
                     >
-                       <option value="">-- None --</option>
-                       <option>Antivirus</option>
-                       <option>Email</option>
-                       <option>Operating System</option>
+                      <option value="">-- None --</option>
+                      {visibleSubcategories.map((item) => (
+                        <option key={item.id} value={item.id}>{item.name}</option>
+                      ))}
                     </select>
                   </div>
                   <div className="grid grid-cols-3 items-center gap-4">
-                    <label className="text-[11px] text-right font-medium text-muted-foreground uppercase leading-tight">Service</label>
-                    <input 
-                      value={newTicket.service}
-                      onChange={e => setNewTicket({...newTicket, service: e.target.value})}
-                      className="col-span-2 p-1.5 border border-border rounded text-xs focus:ring-1 focus:ring-sn-green outline-none h-8" 
-                    />
-                  </div>
-                  <div className="grid grid-cols-3 items-center gap-4">
-                    <label className="text-[11px] text-right font-medium text-muted-foreground uppercase leading-tight">Configuration item</label>
-                    <input 
-                      value={newTicket.cmdbItem}
-                      onChange={e => setNewTicket({...newTicket, cmdbItem: e.target.value})}
-                      className="col-span-2 p-1.5 border border-border rounded text-xs focus:ring-1 focus:ring-sn-green h-8" 
-                    />
+                    <label className="text-[11px] text-right font-medium text-muted-foreground uppercase leading-tight">Service Provider</label>
+                    <select
+                      value={newTicket.serviceId}
+                      onChange={e => {
+                        const service = visibleServices.find((item) => item.id === e.target.value);
+                        setNewTicket({
+                          ...newTicket,
+                          serviceId: e.target.value,
+                          service: service?.name || "",
+                          serviceProvider: service?.providerName || "",
+                          assignmentGroup: ""
+                        });
+                      }}
+                      className="col-span-2 p-1.5 border border-border rounded text-xs focus:ring-1 focus:ring-sn-green outline-none h-8"
+                    >
+                      <option value="">-- Select Service --</option>
+                      {visibleServices.map((item) => (
+                        <option key={item.id} value={item.id}>{serviceDisplayName(item)}</option>
+                      ))}
+                    </select>
                   </div>
                 </div>
 
@@ -641,13 +767,11 @@ export function Tickets() {
                     >
                       <option value="">-- Auto Assign --</option>
                       <option value="Service Desk">Service Desk</option>
-                      <option value="Network Team">Network Team</option>
-                      <option value="Hardware Support">Hardware Support</option>
-                      <option value="App Support">App Support</option>
-                      <option value="DBA Team">DBA Team</option>
-                      <option value="Security Team">Security Team</option>
-                      <option value="Infrastructure Team">Infrastructure Team</option>
-                      <option value="DevOps Team">DevOps Team</option>
+                      {visibleGroups.map((item) => (
+                        <option key={item.id} value={item.name}>
+                          {item.name}{item.members?.length ? ` (${item.members.join(", ")})` : ""}
+                        </option>
+                      ))}
                     </select>
                   </div>
                   <div className="grid grid-cols-3 items-center gap-4">
@@ -695,39 +819,24 @@ export function Tickets() {
                     rows={4}
                     value={newTicket.description}
                     onChange={e => setNewTicket({...newTicket, description: e.target.value})}
-                    className="col-span-5 p-1.5 border border-border rounded text-xs focus:ring-1 focus:ring-sn-green resize-none h-32" 
+                    className={`col-span-5 p-1.5 border rounded text-xs focus:ring-1 focus:ring-sn-green resize-none h-32 transition-all ${suggestedSolution ? 'border-purple-400 ring-1 ring-purple-300 bg-purple-50' : 'border-border'}`}
+                    placeholder="Describe the issue in detail... or use Autofill with AI above"
                   />
                 </div>
               </div>
 
               {/* Suggested Solution Box */}
               {suggestedSolution && (
-                <div className="mt-6 p-4 bg-purple-50 border border-purple-200 rounded-lg">
-                  <h4 className="text-purple-800 font-semibold mb-2 flex items-center">
-                    <span className="mr-2">💡</span> Suggested Solution (AI)
+                <div className="mt-4 p-4 bg-purple-50 border border-purple-200 rounded-lg">
+                  <h4 className="text-purple-800 font-semibold mb-2 flex items-center gap-2">
+                    <span>✨</span> AI filled your description
+                    <span className="text-[10px] font-normal text-purple-500 ml-auto">You can edit it above</span>
                   </h4>
-                  <p className="text-sm text-purple-900 mb-4">{suggestedSolution}</p>
-                  <div className="flex gap-3">
-                    <Button 
-                      type="button" 
-                      onClick={() => {
-                        setSuggestedSolution(null);
-                        setIsModalOpen(false);
-                        alert("Great! Glad we could help.");
-                      }}
-                      className="bg-purple-600 hover:bg-purple-700 text-white text-xs h-8"
-                    >
-                      Yes, this solved my issue
-                    </Button>
-                    <Button 
-                      type="button" 
-                      variant="outline"
-                      onClick={() => setSuggestedSolution(null)}
-                      className="text-xs h-8"
-                    >
-                      No, I still need to create a ticket
-                    </Button>
-                  </div>
+                  <p className="text-xs text-purple-700 italic line-clamp-3">{suggestedSolution}</p>
+                  <button type="button" onClick={() => setSuggestedSolution(null)}
+                    className="mt-2 text-[10px] text-purple-400 hover:text-purple-600 underline">
+                    Dismiss
+                  </button>
                 </div>
               )}
 

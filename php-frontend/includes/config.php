@@ -1,7 +1,6 @@
 <?php
 /**
  * PHP Frontend Configuration
- * Converts React/Firebase app to PHP with session-based auth
  */
 
 session_start();
@@ -20,40 +19,71 @@ $serviceAccount = file_exists($serviceAccountPath) ? json_decode(file_get_conten
 define('BASE_URL', '/php-frontend');
 define('API_BASE', 'https://firestore.googleapis.com/v1/projects/' . FIREBASE_PROJECT_ID . '/databases/' . FIREBASE_DATABASE_ID);
 
-// Helper: Check if user is logged in
+// ── Role Hierarchy ──────────────────────────────────────────
+// user(1) < agent(2) < sub_admin(3) < admin(4) < super_admin(5) < ultra_super_admin(6)
+define('ROLE_LEVELS', [
+    'user'              => 1,
+    'agent'             => 2,
+    'sub_admin'         => 3,
+    'admin'             => 4,
+    'super_admin'       => 5,
+    'ultra_super_admin' => 6,
+]);
+
+define('ROLE_LABELS', [
+    'user'              => 'User',
+    'agent'             => 'Support Agent',
+    'sub_admin'         => 'Sub Admin',
+    'admin'             => 'Administrator',
+    'super_admin'       => 'Super Admin',
+    'ultra_super_admin' => 'Ultra Super Admin',
+]);
+
+// ── Auth helpers ────────────────────────────────────────────
 function isLoggedIn(): bool {
     return isset($_SESSION['user_id']) && !empty($_SESSION['user_id']);
 }
 
-// Helper: Get current user
 function getCurrentUser(): ?array {
     return $_SESSION['user'] ?? null;
 }
 
-// Helper: Get user role
 function getUserRole(): string {
     return $_SESSION['user']['role'] ?? 'user';
 }
 
-// Helper: Check if user is admin
-function isAdmin(): bool {
-    $role = getUserRole();
-    return in_array($role, ['admin', 'super_admin']);
+function getRoleLevel(): int {
+    $levels = ROLE_LEVELS;
+    return $levels[getUserRole()] ?? 1;
 }
 
-// Helper: Check if user is agent
-function isAgent(): bool {
-    $role = getUserRole();
-    return in_array($role, ['agent', 'admin', 'super_admin']);
+function hasRoleLevel(int $minLevel): bool {
+    return getRoleLevel() >= $minLevel;
 }
 
-// Helper: Redirect
+// Convenience helpers
+function isAdmin(): bool           { return getRoleLevel() >= 4; }
+function isSuperAdmin(): bool      { return getRoleLevel() >= 5; }
+function isUltraSuperAdmin(): bool { return getUserRole() === 'ultra_super_admin'; }
+function isAgent(): bool           { return getRoleLevel() >= 2; }
+function isSubAdmin(): bool        { return getRoleLevel() >= 3; }
+
+// Timesheet approvals: admin, super_admin, ultra_super_admin
+function canApproveTimesheets(): bool { return getRoleLevel() >= 4; }
+
+function canManageRole(string $targetRole): bool {
+    $levels = ROLE_LEVELS;
+    $myLevel = getRoleLevel();
+    $targetLevel = $levels[$targetRole] ?? 1;
+    return $myLevel > $targetLevel;
+}
+
+// ── Utilities ───────────────────────────────────────────────
 function redirect(string $path): void {
     header('Location: ' . BASE_URL . $path);
     exit;
 }
 
-// Helper: Require login
 function requireLogin(): void {
     if (!isLoggedIn()) {
         $_SESSION['redirect_after_login'] = $_SERVER['REQUEST_URI'];
@@ -61,7 +91,6 @@ function requireLogin(): void {
     }
 }
 
-// CSRF Protection
 function generateCsrfToken(): string {
     if (empty($_SESSION['csrf_token'])) {
         $_SESSION['csrf_token'] = bin2hex(random_bytes(32));
@@ -73,7 +102,6 @@ function verifyCsrfToken(string $token): bool {
     return isset($_SESSION['csrf_token']) && hash_equals($_SESSION['csrf_token'], $token);
 }
 
-// Flash messages
 function setFlash(string $type, string $message): void {
     $_SESSION['flash'] = ['type' => $type, 'message' => $message];
 }

@@ -36,6 +36,83 @@ export async function seedInitialData() {
        }
     }
 
+    const categoryRef = collection(db, "settings_categories");
+    const categorySnap = await getDocs(query(categoryRef, limit(1)));
+    if (categorySnap.empty) {
+      console.log("Seeding service catalog...");
+
+      const categoryDoc = doc(categoryRef);
+      await setDoc(categoryDoc, {
+        name: "IT Support",
+        isActive: true,
+        createdAt: new Date().toISOString()
+      });
+
+      const networkSubcategoryDoc = doc(collection(db, "settings_subcategories"));
+      const accessSubcategoryDoc = doc(collection(db, "settings_subcategories"));
+
+      await setDoc(networkSubcategoryDoc, {
+        name: "Network Support",
+        categoryId: categoryDoc.id,
+        categoryName: "IT Support",
+        isActive: true,
+        createdAt: new Date().toISOString()
+      });
+
+      await setDoc(accessSubcategoryDoc, {
+        name: "Access Management",
+        categoryId: categoryDoc.id,
+        categoryName: "IT Support",
+        isActive: true,
+        createdAt: new Date().toISOString()
+      });
+
+      const wanServiceDoc = doc(collection(db, "settings_services"));
+      const identityServiceDoc = doc(collection(db, "settings_services"));
+
+      await setDoc(wanServiceDoc, {
+        name: "WAN Connectivity",
+        providerName: "Airtel",
+        categoryId: categoryDoc.id,
+        categoryName: "IT Support",
+        subcategoryId: networkSubcategoryDoc.id,
+        subcategoryName: "Network Support",
+        isActive: true,
+        createdAt: new Date().toISOString()
+      });
+
+      await setDoc(identityServiceDoc, {
+        name: "Identity Access",
+        providerName: "Internal IT",
+        categoryId: categoryDoc.id,
+        categoryName: "IT Support",
+        subcategoryId: accessSubcategoryDoc.id,
+        subcategoryName: "Access Management",
+        isActive: true,
+        createdAt: new Date().toISOString()
+      });
+
+      await addDoc(collection(db, "settings_groups"), {
+        name: "Network Team",
+        members: ["Arun", "Divya", "Karan"],
+        categoryIds: [categoryDoc.id],
+        subcategoryIds: [networkSubcategoryDoc.id],
+        serviceIds: [wanServiceDoc.id],
+        isActive: true,
+        createdAt: new Date().toISOString()
+      });
+
+      await addDoc(collection(db, "settings_groups"), {
+        name: "Access Team",
+        members: ["Monika", "Rahul"],
+        categoryIds: [categoryDoc.id],
+        subcategoryIds: [accessSubcategoryDoc.id],
+        serviceIds: [identityServiceDoc.id],
+        isActive: true,
+        createdAt: new Date().toISOString()
+      });
+    }
+
   } catch (error) {
     console.warn("Seeding skipped or failed:", error);
   }

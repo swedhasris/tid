@@ -30,13 +30,6 @@ export function Approvals() {
       await updateDoc(doc(db, "tickets", ticketId), {
         status: status === "Approved" ? "New" : "Closed",
         updatedAt: serverTimestamp(),
-        history: [
-          { 
-            action: `Approval ${status}`, 
-            timestamp: new Date().toISOString(), 
-            user: profile?.name || "Admin" 
-          }
-        ]
       });
     } catch (error) {
       console.error("Error updating approval:", error);

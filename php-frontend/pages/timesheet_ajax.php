@@ -128,9 +128,9 @@ try {
             break;
             
         case 'approve_timesheet':
-            // Admin: Approve timesheet
-            if (!isAdmin()) {
-                $response = ['success' => false, 'message' => 'Access denied'];
+            // Admin / Super Admin / Ultra Super Admin: Approve timesheet
+            if (!canApproveTimesheets()) {
+                $response = ['success' => false, 'message' => 'Access denied. Admin or above required.'];
                 break;
             }
             
@@ -156,9 +156,9 @@ try {
             break;
             
         case 'reject_timesheet':
-            // Admin: Reject timesheet
-            if (!isAdmin()) {
-                $response = ['success' => false, 'message' => 'Access denied'];
+            // Admin / Super Admin / Ultra Super Admin: Reject timesheet
+            if (!canApproveTimesheets()) {
+                $response = ['success' => false, 'message' => 'Access denied. Admin or above required.'];
                 break;
             }
             
@@ -189,9 +189,9 @@ try {
             break;
             
         case 'reopen_timesheet':
-            // Admin: Reopen rejected timesheet
-            if (!isAdmin()) {
-                $response = ['success' => false, 'message' => 'Access denied'];
+            // Admin / Super Admin / Ultra Super Admin: Reopen rejected timesheet
+            if (!canApproveTimesheets()) {
+                $response = ['success' => false, 'message' => 'Access denied. Admin or above required.'];
                 break;
             }
             

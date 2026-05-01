@@ -315,7 +315,7 @@ async function startServer() {
 
       const ai = new GoogleGenAI({ apiKey });
       const result = await ai.models.generateContent({
-        model: "gemini-1.5-flash",
+        model: "gemini-flash-latest",
         contents: `Analyze the following IT issue and classify it.\nIssue: "${text}"\n\nRespond ONLY with a valid JSON object with "category" and "priority" keys.\nCategory must be one of: "Network", "Software", "Hardware", "Database", "Inquiry / Help".\nPriority must be one of: "Low", "Medium", "High", "Critical".\nExample: {"category": "Network", "priority": "High"}`,
       });
 
@@ -345,7 +345,7 @@ async function startServer() {
 
       const ai = new GoogleGenAI({ apiKey });
       const result = await ai.models.generateContent({
-        model: "gemini-1.5-flash",
+        model: "gemini-flash-latest",
         contents: `A user is experiencing this IT issue: "${text}".\nProvide a short, direct suggested solution to help them fix it before creating a ticket. Keep it under 3 sentences and be friendly.`,
       });
 

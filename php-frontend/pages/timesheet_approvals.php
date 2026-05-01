@@ -4,8 +4,8 @@
  * For managers to review and approve/reject submitted timesheets
  */
 
-if (!isAdmin()) {
-    setFlash('error', 'Access denied. Admin only.');
+if (!canApproveTimesheets()) {
+    setFlash('error', 'Access denied. Admin, Super Admin, or Ultra Super Admin only.');
     redirect('/dashboard');
 }
 

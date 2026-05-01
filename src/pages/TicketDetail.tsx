@@ -1,22 +1,36 @@
 import React, { useEffect, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import { doc, onSnapshot, updateDoc, serverTimestamp, collection, addDoc, query, orderBy } from "firebase/firestore";
+import { doc, onSnapshot, updateDoc, serverTimestamp, collection, addDoc, query, orderBy, getDocs } from "firebase/firestore";
 import { db, handleFirestoreError, OperationType } from "../lib/firebase";
 import { useAuth } from "../contexts/AuthContext";
 import { Button } from "@/components/ui/button";
 import { ChevronLeft, Send, History, MessageSquare, Save, Trash2, CheckCircle2, Clock, Plus } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { SLATimer } from "../components/SLATimer";
+import { getGroupsForSelection, getServicesForSubcategory, getSubcategoriesForCategory, serviceDisplayName, useServiceCatalog } from "../lib/serviceCatalog";
 
 export function TicketDetail() {
   const { id } = useParams();
   const navigate = useNavigate();
   const { user, profile } = useAuth();
+  const { categories, subcategories, services, groups } = useServiceCatalog();
   const [ticket, setTicket] = useState<any>(null);
   const [editedTicket, setEditedTicket] = useState<any>(null);
   const [comments, setComments] = useState<any[]>([]);
   const [newComment, setNewComment] = useState("");
+  const [workNote, setWorkNote] = useState("");
   const [isUpdating, setIsUpdating] = useState(false);
+  const [agents, setAgents] = useState<any[]>([]);
+  const visibleCategories = categories.filter((item) => !["cmdb", "it infrastructure"].includes((item.name || "").toLowerCase()));
+  const visibleSubcategories = getSubcategoriesForCategory(subcategories, editedTicket?.categoryId || "");
+  const visibleServices = getServicesForSubcategory(services, editedTicket?.subcategoryId || "");
+  const visibleGroups = getGroupsForSelection(groups, editedTicket?.categoryId || "", editedTicket?.subcategoryId || "", editedTicket?.serviceId || "");
+
+  useEffect(() => {
+    getDocs(collection(db, "users")).then(snap => {
+      setAgents(snap.docs.map(d => ({ id: d.id, ...d.data() })).filter((u: any) => ["agent","admin","super_admin"].includes(u.role)));
+    }).catch(() => {});
+  }, []);
 
   useEffect(() => {
     if (!id) return;
@@ -51,7 +65,7 @@ export function TicketDetail() {
     setIsUpdating(true);
     try {
       const historyEntries: any[] = [];
-      const fields = ["category", "subcategory", "service", "status", "impact", "urgency", "assignmentGroup", "title", "description", "assignedTo"];
+      const fields = ["category", "categoryId", "subcategory", "subcategoryId", "service", "serviceId", "serviceProvider", "status", "impact", "urgency", "assignmentGroup", "title", "description", "assignedTo", "affectedUser"];
       
       fields.forEach(field => {
         if (editedTicket[field] !== ticket[field]) {
@@ -130,9 +144,10 @@ export function TicketDetail() {
     if (!newComment.trim() || !id || !user) return;
 
     try {
+      const now = new Date().toISOString();
       const historyEntry = { 
         action: "Comment Added", 
-        timestamp: new Date().toISOString(), 
+        timestamp: now, 
         user: profile?.name || user.email 
       };
 
@@ -141,15 +156,27 @@ export function TicketDetail() {
         history: [...(ticket.history || []), historyEntry]
       };
 
-      if (!ticket.firstResponseAt && (profile?.role === "agent" || profile?.role === "admin")) {
-        updates.firstResponseAt = new Date().toISOString();
+      // First response by any agent/admin → stop response timer, start resolution timer
+      if (!ticket.firstResponseAt) {
+        updates.firstResponseAt = now;
         updates.responseSlaStatus = "Completed";
+        // Resolution deadline starts from now + resolutionTimeHours
+        // We extend the existing resolutionDeadline to be relative to firstResponseAt
+        if (ticket.resolutionDeadline) {
+          const createdMs = ticket.createdAt
+            ? (typeof ticket.createdAt === 'string' ? new Date(ticket.createdAt).getTime()
+              : ticket.createdAt?.seconds ? ticket.createdAt.seconds * 1000 : Date.now())
+            : Date.now();
+          const originalWindow = new Date(ticket.resolutionDeadline).getTime() - createdMs;
+          updates.resolutionDeadline = new Date(Date.now() + originalWindow).toISOString();
+        }
       }
 
       await addDoc(collection(db, "tickets", id, "comments"), {
         userId: user.uid,
         userName: profile?.name || user.email,
         message: newComment,
+        type: "comment",
         createdAt: serverTimestamp()
       });
 
@@ -157,6 +184,36 @@ export function TicketDetail() {
       setNewComment("");
     } catch (error) {
       console.error("Error adding comment:", error);
+    }
+  };
+
+  const handleAddWorkNote = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!workNote.trim() || !id || !user) return;
+
+    try {
+      const historyEntry = {
+        action: "Work Note Added",
+        timestamp: new Date().toISOString(),
+        user: profile?.name || user.email
+      };
+
+      await addDoc(collection(db, "tickets", id, "comments"), {
+        userId: user.uid,
+        userName: profile?.name || user.email,
+        message: workNote,
+        type: "work_note",
+        createdAt: serverTimestamp()
+      });
+
+      await updateDoc(doc(db, "tickets", id), {
+        updatedAt: serverTimestamp(),
+        history: [...(ticket.history || []), historyEntry]
+      });
+
+      setWorkNote("");
+    } catch (error) {
+      console.error("Error adding work note:", error);
     }
   };
 
@@ -236,6 +293,7 @@ export function TicketDetail() {
               stoppedAt={ticket.resolvedAt}
               onHoldStart={ticket.status === "On Hold" ? ticket.onHoldStart : null}
               totalPausedTime={ticket.totalPausedTime}
+              waitUntil={ticket.firstResponseAt ?? null}
             />
           </div>
           <div className="flex items-center gap-2">
@@ -276,36 +334,83 @@ export function TicketDetail() {
                   <input readOnly className="col-span-2 p-1.5 bg-muted/30 border border-border rounded text-xs font-mono" value={ticket.number} />
                 </div>
                 <div className="grid grid-cols-3 items-center gap-4">
-                  <label className="text-[11px] text-right font-medium text-muted-foreground uppercase leading-tight">Caller</label>
+                  <label className="text-[11px] text-right font-medium text-muted-foreground uppercase leading-tight">Reporting User</label>
                   <div className="col-span-2 flex gap-1">
-                    <input readOnly className="flex-grow p-1.5 bg-muted/30 border border-border rounded text-xs" value={ticket.caller} />
+                    <input readOnly className="flex-grow p-1.5 bg-muted/30 border border-border rounded text-xs" value={ticket.caller || ''} />
                     <Button variant="outline" size="icon" className="w-8 h-8 flex-shrink-0"><span className="text-[10px]">i</span></Button>
+                  </div>
+                </div>
+                <div className="grid grid-cols-3 items-center gap-4">
+                  <label className="text-[11px] text-right font-medium text-muted-foreground uppercase leading-tight">Affected User</label>
+                  <div className="col-span-2 flex gap-1">
+                    <input
+                      className="flex-grow p-1.5 border border-border rounded text-xs focus:ring-1 focus:ring-sn-green outline-none"
+                      value={editedTicket?.affectedUser || ''}
+                      onChange={e => updateLocalField('affectedUser', e.target.value)}
+                      placeholder="Who is affected? (if different)"
+                    />
                   </div>
                 </div>
                 <div className="grid grid-cols-3 items-center gap-4">
                   <label className="text-[11px] text-right font-medium text-muted-foreground uppercase leading-tight">Category</label>
                   <select 
-                    value={editedTicket?.category || ""}
-                    onChange={(e) => updateLocalField("category", e.target.value)}
+                    value={editedTicket?.categoryId || ""}
+                    onChange={(e) => {
+                      const category = visibleCategories.find((item) => item.id === e.target.value);
+                      setEditedTicket((prev: any) => ({
+                        ...prev,
+                        categoryId: e.target.value,
+                        category: category?.name || "",
+                        subcategoryId: "",
+                        subcategory: "",
+                        serviceId: "",
+                        service: "",
+                        serviceProvider: "",
+                        assignmentGroup: ""
+                      }));
+                    }}
                     className="col-span-2 p-1.5 border border-border rounded text-xs focus:ring-1 focus:ring-sn-green outline-none h-8"
                   >
-                    {["Inquiry / Help", "Software", "Hardware", "Network", "Database"].map(c => <option key={c} value={c}>{c}</option>)}
+                    {visibleCategories.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
                   </select>
                 </div>
                 <div className="grid grid-cols-3 items-center gap-4">
                   <label className="text-[11px] text-right font-medium text-muted-foreground uppercase leading-tight">Subcategory</label>
                   <select 
-                    value={editedTicket?.subcategory || ""}
-                    onChange={(e) => updateLocalField("subcategory", e.target.value)}
+                    value={editedTicket?.subcategoryId || ""}
+                    onChange={(e) => {
+                      const subcategory = visibleSubcategories.find((item) => item.id === e.target.value);
+                      setEditedTicket((prev: any) => ({
+                        ...prev,
+                        subcategoryId: e.target.value,
+                        subcategory: subcategory?.name || "",
+                        serviceId: "",
+                        service: "",
+                        serviceProvider: "",
+                        assignmentGroup: ""
+                      }));
+                    }}
                     className="col-span-2 p-1.5 border border-border rounded text-xs focus:ring-1 focus:ring-sn-green outline-none h-8"
                   >
                     <option value="">-- None --</option>
-                    {["Antivirus", "Email", "Operating System", "Internal Application"].map(c => <option key={c} value={c}>{c}</option>)}
+                    {visibleSubcategories.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
                   </select>
                 </div>
                 <div className="grid grid-cols-3 items-center gap-4">
-                  <label className="text-[11px] text-right font-medium text-muted-foreground uppercase leading-tight">Service</label>
-                  <input className="col-span-2 p-1.5 border border-border rounded text-xs outline-none focus:ring-1 focus:ring-sn-green h-8" value={editedTicket?.service || ""} onChange={(e) => updateLocalField("service", e.target.value)} />
+                  <label className="text-[11px] text-right font-medium text-muted-foreground uppercase leading-tight">Service Provider</label>
+                  <select className="col-span-2 p-1.5 border border-border rounded text-xs outline-none focus:ring-1 focus:ring-sn-green h-8" value={editedTicket?.serviceId || ""} onChange={(e) => {
+                    const service = visibleServices.find((item) => item.id === e.target.value);
+                    setEditedTicket((prev: any) => ({
+                      ...prev,
+                      serviceId: e.target.value,
+                      service: service?.name || "",
+                      serviceProvider: service?.providerName || "",
+                      assignmentGroup: ""
+                    }));
+                  }}>
+                    <option value="">-- Select Service --</option>
+                    {visibleServices.map((item) => <option key={item.id} value={item.id}>{serviceDisplayName(item)}</option>)}
+                  </select>
                 </div>
               </div>
 
@@ -350,13 +455,16 @@ export function TicketDetail() {
                   <select className="col-span-2 p-1.5 border border-border rounded text-xs outline-none focus:ring-1 focus:ring-sn-green h-8" value={editedTicket?.assignmentGroup || ""} onChange={(e) => updateLocalField("assignmentGroup", e.target.value)}>
                     <option value="">-- None --</option>
                     <option value="Service Desk">Service Desk</option>
-                    <option value="Network Team">Network Team</option>
-                    <option value="Hardware Support">Hardware Support</option>
-                    <option value="App Support">App Support</option>
-                    <option value="DBA Team">DBA Team</option>
-                    <option value="Security Team">Security Team</option>
-                    <option value="Infrastructure Team">Infrastructure Team</option>
-                    <option value="DevOps Team">DevOps Team</option>
+                    {visibleGroups.map((item) => <option key={item.id} value={item.name}>{item.name}</option>)}
+                  </select>
+                </div>
+                <div className="grid grid-cols-3 items-center gap-4">
+                  <label className="text-[11px] text-right font-medium text-muted-foreground uppercase leading-tight">Assigned Member</label>
+                  <select className="col-span-2 p-1.5 border border-border rounded text-xs outline-none focus:ring-1 focus:ring-sn-green h-8" value={editedTicket?.assignedTo || ""} onChange={(e) => updateLocalField("assignedTo", e.target.value)}>
+                    <option value="">-- None --</option>
+                    {agents.map(agent => (
+                      <option key={agent.id} value={agent.id}>{agent.name || agent.email}</option>
+                    ))}
                   </select>
                 </div>
               </div>
@@ -448,10 +556,19 @@ export function TicketDetail() {
                       <label htmlFor="workNotesCheck" className="text-[10px] text-muted-foreground">Internal only</label>
                     </div>
                   </div>
-                  <textarea 
-                    placeholder="Type internal work notes here..." 
-                    className="w-full p-3 border border-border rounded text-xs focus:ring-1 focus:ring-sn-green outline-none min-h-[100px] resize-none bg-yellow-50/20"
-                  />
+                  <form onSubmit={handleAddWorkNote} className="space-y-2">
+                    <textarea 
+                      value={workNote}
+                      onChange={e => setWorkNote(e.target.value)}
+                      placeholder="Type internal work notes here..." 
+                      className="w-full p-3 border border-border rounded text-xs focus:ring-1 focus:ring-yellow-400 outline-none min-h-[100px] resize-none bg-yellow-50/40"
+                    />
+                    <div className="flex justify-end">
+                      <Button type="submit" size="sm" variant="outline" className="h-8 font-bold gap-2 text-yellow-700 border-yellow-300 hover:bg-yellow-50">
+                        <Save className="w-3 h-3" /> Save Work Note
+                      </Button>
+                    </div>
+                  </form>
                 </div>
 
                 <div className="space-y-2">
@@ -480,12 +597,19 @@ export function TicketDetail() {
                 <div className="space-y-6 max-h-[600px] overflow-y-auto pr-2">
                   {comments.map((comment) => (
                     <div key={comment.id} className="relative pl-8 pb-6 border-l border-border last:border-0 ml-2">
-                      <div className="absolute -left-2 top-0 w-4 h-4 rounded-full bg-sn-green flex items-center justify-center">
-                        <MessageSquare className="w-2.5 h-2.5 text-sn-dark" />
+                      <div className={`absolute -left-2 top-0 w-4 h-4 rounded-full flex items-center justify-center ${comment.type === 'work_note' ? 'bg-yellow-400' : 'bg-sn-green'}`}>
+                        {comment.type === 'work_note'
+                          ? <Save className="w-2.5 h-2.5 text-white" />
+                          : <MessageSquare className="w-2.5 h-2.5 text-sn-dark" />}
                       </div>
-                      <div className="bg-muted/10 border border-border rounded p-3">
+                      <div className={`border rounded p-3 ${comment.type === 'work_note' ? 'bg-yellow-50/60 border-yellow-200' : 'bg-muted/10 border-border'}`}>
                         <div className="flex items-center justify-between mb-2">
-                          <span className="text-[11px] font-bold">{comment.userName}</span>
+                          <div className="flex items-center gap-2">
+                            <span className="text-[11px] font-bold">{comment.userName}</span>
+                            {comment.type === 'work_note' && (
+                              <span className="text-[9px] bg-yellow-200 text-yellow-800 px-1.5 py-0.5 rounded font-bold uppercase">Work Note</span>
+                            )}
+                          </div>
                           <span className="text-[10px] text-muted-foreground">{formatDate(comment.createdAt)}</span>
                         </div>
                         <p className="text-[11px] text-foreground leading-relaxed italic">{comment.message}</p>
